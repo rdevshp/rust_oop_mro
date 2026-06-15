@@ -99,6 +99,7 @@ oop_class! {
     }
 }
 #[derive(Debug)]
+#[allow(dead_code)]
 struct Job {
     id: u32
 }
