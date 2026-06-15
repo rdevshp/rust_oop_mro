@@ -170,14 +170,17 @@ fn main() {
     println!("job id: {:?} ", job_factory.create());
 
     // checked downcast
-    let mut factory: Box<dyn AsFactory<Job>> = Box::new(job_factory);
-    let mut factory_downcast_result = factory.downcast::<dyn AsJobFactory>();
+    let factory: Box<dyn AsFactory<Job>> = Box::new(job_factory);
+    let factory_downcast_result = factory.downcast::<dyn AsJobFactory>();
     match factory_downcast_result {
         Ok(mut job_factory_downcast) => {
             println!("downcasted to job_factory");
-            println!("job_factory_downcast job id: {:?}:", job_factory_downcast.as_job_factory_mut().create());
-        },
-        Err(factory) => {
+            println!(
+                "job_factory_downcast job id: {:?}:",
+                job_factory_downcast.as_job_factory_mut().create()
+            );
+        }
+        Err(_) => {
             println!("failed to downcast factory");
         }
     }
