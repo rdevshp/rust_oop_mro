@@ -102,8 +102,9 @@ oop_class! {
     }
 }
 #[derive(Debug)]
+#[allow(dead_code)]
 struct Job {
-    id: u32
+    id: u32,
 }
 oop_class! {
     abstract class Factory<T> {
@@ -145,6 +146,16 @@ fn main() {
     for object in &animals {
         let animal: &Animal = object.as_animal();
         println!("{}", animal.name());
+
+        // checked downcast
+        match animal.downcast_ref::<Dog>() {
+            Some(dog) => {
+                println!("{} is a dog!", dog.name());
+            }
+            None => {
+                println!("{} is not a dog!", animal.name());
+            }
+        }
     }
 
     assert_eq!(
@@ -161,5 +172,18 @@ fn main() {
     println!("job id: {:?} ", job_factory.create());
     println!("job id: {:?} ", job_factory.create());
 
+    // checked downcast
+    let mut factory: Box<dyn AsFactory<Job>> = Box::new(job_factory);
+    let mut factory_downcast_result = factory.downcast::<dyn AsJobFactory>();
+    match factory_downcast_result {
+        Ok(mut job_factory_downcast) => {
+            println!("downcasted to job_factory");
+            println!("job_factory_downcast job id: {:?}:", job_factory_downcast.as_job_factory_mut().create());
+        },
+        Err(factory) => {
+            println!("failed to downcast factory");
+        }
+    }
 }
+
 ```
