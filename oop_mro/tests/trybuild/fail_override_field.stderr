@@ -1,0 +1,5 @@
+error: `#[override]` is only allowed on virtual methods
+ --> tests/trybuild/fail_override_field.rs:6:9
+  |
+6 |         value: usize,
+  |         ^^^^^

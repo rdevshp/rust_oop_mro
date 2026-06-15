@@ -1,0 +1,8 @@
+[package]
+name = "oop_mro_playground"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+oop_mro.workspace = true

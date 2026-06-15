@@ -1,0 +1,5 @@
+error: method `speak` is marked `#[override]` but does not override an inherited virtual method
+ --> tests/trybuild/fail_override_no_inherited.rs:6:20
+  |
+6 |         virtual fn speak(&self) -> String {
+  |                    ^^^^^

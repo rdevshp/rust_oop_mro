@@ -1,0 +1,5 @@
+error: unknown base class `Animal`
+ --> tests/trybuild/fail_unknown_base.rs:4:16
+  |
+4 |     class Dog: Animal {}
+  |                ^^^^^^

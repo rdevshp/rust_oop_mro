@@ -1,0 +1,5 @@
+error: async methods are not supported
+ --> tests/trybuild/fail_unsupported_method.rs:5:9
+  |
+5 |         async fn speak(&self) -> String {
+  |         ^^^^^

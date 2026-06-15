@@ -1,0 +1,5 @@
+error: unimplemented method `area` must be declared as `abstract virtual fn`
+ --> tests/trybuild/fail_non_virtual_abstract_method.rs:5:12
+  |
+5 |         fn area(&self) -> usize;
+  |            ^^^^

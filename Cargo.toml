@@ -1,0 +1,15 @@
+[workspace]
+members = ["oop_mro", "oop_mro_macros", "oop_mro_examples"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+oop_mro = { path = "oop_mro" }
+oop_mro_macros = { path = "oop_mro_macros" }
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["extra-traits", "full", "visit-mut"] }

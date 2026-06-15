@@ -1,0 +1,5 @@
+error: method `speak` does not satisfy the virtual signature declared in `Animal`
+  --> tests/trybuild/fail_virtual_incompatible_override.rs:12:20
+   |
+12 |         virtual fn speak(&self) -> usize {
+   |                    ^^^^^

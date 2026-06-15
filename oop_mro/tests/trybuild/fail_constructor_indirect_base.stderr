@@ -1,0 +1,5 @@
+error: constructor initializer `Object` must name a direct base class of `Dog`
+ --> tests/trybuild/fail_constructor_indirect_base.rs:8:24
+  |
+8 |         constructor(): Object() {}
+  |                        ^^^^^^

@@ -1,0 +1,5 @@
+error: method `value` has incompatible inherited signatures; override it in `C` to resolve the conflict
+  --> tests/trybuild/fail_signature_mismatch.rs:16:11
+   |
+16 |     class C: A, B {}
+   |           ^

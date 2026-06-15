@@ -1,0 +1,5 @@
+error: method `area` does not satisfy the virtual signature declared in `AbstractShape`
+  --> tests/trybuild/fail_abstract_signature_mismatch.rs:10:20
+   |
+10 |         virtual fn area(&self) -> String {
+   |                    ^^^^

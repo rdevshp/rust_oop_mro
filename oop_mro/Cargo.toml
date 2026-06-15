@@ -1,0 +1,11 @@
+[package]
+name = "oop_mro"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+oop_mro_macros.workspace = true
+
+[dev-dependencies]
+trybuild = "1"

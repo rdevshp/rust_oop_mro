@@ -1,0 +1,5 @@
+error: unimplemented method `area` is only allowed in an abstract class; declare `abstract class Shape`
+ --> tests/trybuild/fail_concrete_unimplemented.rs:5:29
+  |
+5 |         abstract virtual fn area(&self) -> usize;
+  |                             ^^^^

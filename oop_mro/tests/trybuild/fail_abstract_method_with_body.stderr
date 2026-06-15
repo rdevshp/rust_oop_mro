@@ -1,0 +1,5 @@
+error: method `area` is declared `abstract` but has an implementation
+ --> tests/trybuild/fail_abstract_method_with_body.rs:5:29
+  |
+5 |         abstract virtual fn area(&self) -> usize {
+  |                             ^^^^

@@ -1,0 +1,5 @@
+error: `#[override]` is only allowed on virtual methods
+ --> tests/trybuild/fail_override_class.rs:5:11
+  |
+5 |     class Animal {}
+  |           ^^^^^^

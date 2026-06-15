@@ -1,0 +1,5 @@
+error: duplicate constructor for class `Animal`
+ --> tests/trybuild/fail_duplicate_constructor.rs:6:9
+  |
+6 |         constructor(name: String) {}
+  |         ^^^^^^^^^^^

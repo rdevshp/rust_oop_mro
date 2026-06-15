@@ -1,0 +1,5 @@
+error: method `speak` is marked `#[override]` but is not declared `virtual fn`
+ --> tests/trybuild/fail_override_non_virtual.rs:6:12
+  |
+6 |         fn speak(&self) -> String {
+  |            ^^^^^

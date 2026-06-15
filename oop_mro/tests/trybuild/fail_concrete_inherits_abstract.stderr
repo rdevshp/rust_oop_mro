@@ -1,0 +1,5 @@
+error: concrete class `StillAbstract` must implement abstract method(s) `area`; declare `abstract class StillAbstract` to keep it abstract
+ --> tests/trybuild/fail_concrete_inherits_abstract.rs:8:11
+  |
+8 |     class StillAbstract: AbstractShape {}
+  |           ^^^^^^^^^^^^^

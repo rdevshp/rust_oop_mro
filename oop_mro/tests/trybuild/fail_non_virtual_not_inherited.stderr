@@ -1,0 +1,18 @@
+error[E0599]: no method named `local` found for struct `Derived` in the current scope
+  --> tests/trybuild/fail_non_virtual_not_inherited.rs:15:21
+   |
+ 3 | / oop_class! {
+ 4 | |     class Base {
+ 5 | |         fn local(&self) -> i32 {
+ 6 | |             1
+...  |
+10 | |     class Derived: Base {}
+   | |_________________- method `local` not found for this struct
+...
+15 |       let _ = derived.local();
+   |                       ^^^^^ method not found in `Derived`
+   |
+help: one of the expressions' fields has a method of the same name
+   |
+15 |     let _ = derived.__oop_base_base.local();
+   |                     ++++++++++++++++

@@ -1,0 +1,5 @@
+error: generated base-cast trait name `AsAnimal` conflicts with an existing class name
+ --> tests/trybuild/fail_base_cast_trait_name_collision.rs:4:11
+  |
+4 |     class Animal {}
+  |           ^^^^^^

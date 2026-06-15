@@ -1,0 +1,5 @@
+error: inheritance cycle involving class `A`
+ --> tests/trybuild/fail_cycle.rs:4:11
+  |
+4 |     class A: B {}
+  |           ^

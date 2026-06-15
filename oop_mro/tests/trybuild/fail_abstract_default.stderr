@@ -1,0 +1,16 @@
+error[E0599]: no function or associated item named `default` found for struct `StillAbstract` in the current scope
+  --> tests/trybuild/fail_abstract_default.rs:12:28
+   |
+ 3 | / oop_class! {
+ 4 | |     abstract class AbstractShape {
+ 5 | |         abstract virtual fn area(&self) -> usize;
+...  |
+ 8 | |     abstract class StillAbstract: AbstractShape {}
+   | |________________________________- function or associated item `default` not found for this struct
+...
+12 |       let _ = StillAbstract::default();
+   |                              ^^^^^^^ function or associated item not found in `StillAbstract`
+   |
+   = help: items from traits can only be used if the trait is implemented and in scope
+   = note: the following trait defines an item `default`, perhaps you need to implement it:
+           candidate #1: `Default`
