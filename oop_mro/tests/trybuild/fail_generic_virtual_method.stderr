@@ -1,0 +1,5 @@
+error: generic virtual methods and virtual method where clauses are not supported
+ --> tests/trybuild/fail_generic_virtual_method.rs:5:28
+  |
+5 |         virtual fn identity<T>(&self, value: T) -> T {
+  |                            ^^^
