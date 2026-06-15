@@ -10,17 +10,23 @@ pub(super) fn generate_impls(graph: &Graph, index: usize, class: &ClassDef) -> T
     let vtable_init = constructors::generate_vtable_init(graph, index);
     let constructor_hook = constructors::generate_constructor_hook(graph, index, class);
     let constructor_new = constructors::generate_constructor_new(graph, index, class);
-    let direct_methods = class.items.iter().filter_map(|item| match item {
+    let direct_items = class.items.iter().filter_map(|item| match item {
+        ClassItem::AssociatedConst(associated_const) => {
+            Some(generate_associated_const(associated_const))
+        }
         ClassItem::Method(method) if !method.is_virtual => generate_direct_method(method),
         ClassItem::Field(_) => None,
         ClassItem::Method(_) => None,
         ClassItem::Constructor(_) => None,
+        ClassItem::UnsupportedAssociatedType(_) => None,
     });
     let virtual_impl_methods = class.items.iter().filter_map(|item| match item {
         ClassItem::Method(method) if method.is_virtual => generate_virtual_impl_method(method),
         ClassItem::Field(_) => None,
         ClassItem::Method(_) => None,
         ClassItem::Constructor(_) => None,
+        ClassItem::AssociatedConst(_) => None,
+        ClassItem::UnsupportedAssociatedType(_) => None,
     });
     let virtual_wrappers = interface_methods(graph, index)
         .into_iter()
@@ -36,12 +42,20 @@ pub(super) fn generate_impls(graph: &Graph, index: usize, class: &ClassDef) -> T
             #accessors
             #constructor_hook
             #constructor_new
-            #(#direct_methods)*
+            #(#direct_items)*
             #(#virtual_impl_methods)*
             #(#virtual_wrappers)*
         }
 
         #default_impl
+    }
+}
+
+fn generate_associated_const(associated_const: &AssociatedConstDef) -> TokenStream2 {
+    let mut item = associated_const.item.clone();
+    item.vis = public_if_inherited(&item.vis);
+    quote! {
+        #item
     }
 }
 

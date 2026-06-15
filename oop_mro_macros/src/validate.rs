@@ -4,7 +4,10 @@ use proc_macro2::Span;
 use quote::ToTokens;
 use syn::{parse_quote, Error, FnArg, Pat, Receiver, Visibility};
 
-use crate::ast::{ClassDef, ClassItem, ConstructorDef, FieldDef, MethodDef, OopBlock};
+use crate::ast::{
+    AssociatedConstDef, AssociatedTypeDef, ClassDef, ClassItem, ConstructorDef, FieldDef,
+    MethodDef, OopBlock,
+};
 use crate::c3;
 use crate::generics::method_signature_key_in_context;
 use crate::model::{Graph, MethodInfo, MethodMap, ReceiverKind};
@@ -115,12 +118,16 @@ fn collect_direct_methods(classes: &[ClassDef], errors: &mut Vec<Error>) -> Vec<
     for (class_index, class) in classes.iter().enumerate() {
         let mut methods = BTreeMap::new();
         let mut fields = HashSet::new();
+        let mut method_names = HashSet::new();
+        let mut associated_items = HashSet::new();
 
         for item in &class.items {
             match item {
                 ClassItem::Field(field) => validate_field(field, &mut fields, errors),
                 ClassItem::Method(method) => {
                     let name = method.sig.ident.to_string();
+                    let is_duplicate_method = !method_names.insert(name.clone());
+                    let is_duplicate_associated_item = !associated_items.insert(name.clone());
                     if method.is_override && !method.is_virtual {
                         errors.push(Error::new_spanned(
                             &method.sig.ident,
@@ -161,17 +168,32 @@ fn collect_direct_methods(classes: &[ClassDef], errors: &mut Vec<Error>) -> Vec<
                             "method names starting with `__oop_` are reserved",
                         ));
                     }
+                    if is_duplicate_method {
+                        errors.push(Error::new_spanned(
+                            &method.sig.ident,
+                            format!("duplicate method `{name}`"),
+                        ));
+                    } else if is_duplicate_associated_item {
+                        errors.push(Error::new_spanned(
+                            &method.sig.ident,
+                            format!("duplicate associated item `{name}`"),
+                        ));
+                    }
                     match analyze_method(class_index, method) {
-                        Ok(info) => {
-                            if methods.insert(name.clone(), info).is_some() {
-                                errors.push(Error::new_spanned(
-                                    &method.sig.ident,
-                                    format!("duplicate method `{name}`"),
-                                ));
+                        Ok(Some(info)) => {
+                            if !is_duplicate_method && !is_duplicate_associated_item {
+                                methods.insert(name.clone(), info);
                             }
                         }
+                        Ok(None) => {}
                         Err(method_errors) => errors.extend(method_errors),
                     }
+                }
+                ClassItem::AssociatedConst(associated_const) => {
+                    validate_associated_const(associated_const, &mut associated_items, errors);
+                }
+                ClassItem::UnsupportedAssociatedType(associated_type) => {
+                    validate_unsupported_associated_type(associated_type, errors);
                 }
                 ClassItem::Constructor(_) => {}
             }
@@ -205,6 +227,48 @@ fn validate_field(field: &FieldDef, fields: &mut HashSet<String>, errors: &mut V
     }
 }
 
+fn validate_associated_const(
+    associated_const: &AssociatedConstDef,
+    associated_items: &mut HashSet<String>,
+    errors: &mut Vec<Error>,
+) {
+    let name = associated_const.item.ident.to_string();
+    if associated_const.is_override {
+        errors.push(Error::new_spanned(
+            &associated_const.item.ident,
+            "`#[override]` is only allowed on virtual methods",
+        ));
+    }
+    if name.starts_with("__oop_") {
+        errors.push(Error::new_spanned(
+            &associated_const.item.ident,
+            "associated item names starting with `__oop_` are reserved",
+        ));
+    }
+    if !associated_items.insert(name.clone()) {
+        errors.push(Error::new_spanned(
+            &associated_const.item.ident,
+            format!("duplicate associated item `{name}`"),
+        ));
+    }
+}
+
+fn validate_unsupported_associated_type(
+    associated_type: &AssociatedTypeDef,
+    errors: &mut Vec<Error>,
+) {
+    if associated_type.is_override {
+        errors.push(Error::new_spanned(
+            &associated_type.item.ident,
+            "`#[override]` is only allowed on virtual methods",
+        ));
+    }
+    errors.push(Error::new_spanned(
+        &associated_type.item.ident,
+        "associated types in class bodies are not supported because Rust inherent associated types are unstable",
+    ));
+}
+
 fn validate_constructors(
     classes: &[ClassDef],
     bases: &[Vec<usize>],
@@ -224,13 +288,34 @@ fn validate_constructors(
 
         let has_constructor = !constructors.is_empty();
         for item in &class.items {
-            if let ClassItem::Method(method) = item {
-                if has_constructor && method.sig.ident == "new" {
+            if !has_constructor {
+                continue;
+            }
+
+            match item {
+                ClassItem::Method(method) if method.sig.ident == "new" => {
                     errors.push(Error::new_spanned(
                         &method.sig.ident,
                         "constructor generates method `new`, but class already declares method `new`",
                     ));
                 }
+                ClassItem::AssociatedConst(associated_const)
+                    if associated_const.item.ident == "new" =>
+                {
+                    errors.push(Error::new_spanned(
+                        &associated_const.item.ident,
+                        "constructor generates method `new`, but class already declares associated item `new`",
+                    ));
+                }
+                ClassItem::UnsupportedAssociatedType(associated_type)
+                    if associated_type.item.ident == "new" =>
+                {
+                    errors.push(Error::new_spanned(
+                        &associated_type.item.ident,
+                        "constructor generates method `new`, but class already declares associated item `new`",
+                    ));
+                }
+                _ => {}
             }
         }
 
@@ -325,7 +410,7 @@ fn validate_concrete_classes(
     }
 }
 
-fn analyze_method(owner: usize, method: &MethodDef) -> Result<MethodInfo, Vec<Error>> {
+fn analyze_method(owner: usize, method: &MethodDef) -> Result<Option<MethodInfo>, Vec<Error>> {
     let mut errors = Vec::new();
     let sig = &method.sig;
 
@@ -361,6 +446,14 @@ fn analyze_method(owner: usize, method: &MethodDef) -> Result<MethodInfo, Vec<Er
             &sig.variadic,
             "variadic methods are not supported",
         ));
+    }
+
+    if !method.is_virtual {
+        validate_non_virtual_method_inputs(sig, &mut errors);
+        if errors.is_empty() {
+            return Ok(None);
+        }
+        return Err(errors);
     }
 
     let Some(first_arg) = sig.inputs.first() else {
@@ -413,7 +506,7 @@ fn analyze_method(owner: usize, method: &MethodDef) -> Result<MethodInfo, Vec<Er
 
     let signature_display = sig.to_token_stream().to_string();
 
-    Ok(MethodInfo {
+    Ok(Some(MethodInfo {
         owner,
         name: sig.ident.clone(),
         vis: public_if_inherited(&method.vis),
@@ -425,7 +518,29 @@ fn analyze_method(owner: usize, method: &MethodDef) -> Result<MethodInfo, Vec<Er
         arg_idents,
         arg_types,
         signature_display,
-    })
+    }))
+}
+
+fn validate_non_virtual_method_inputs(sig: &syn::Signature, errors: &mut Vec<Error>) {
+    for (index, arg) in sig.inputs.iter().enumerate() {
+        match arg {
+            FnArg::Receiver(receiver) if index == 0 => {
+                validate_receiver(receiver, errors);
+            }
+            FnArg::Receiver(receiver) => errors.push(Error::new_spanned(
+                receiver,
+                "only one receiver is supported",
+            )),
+            FnArg::Typed(typed) => {
+                if !matches!(typed.pat.as_ref(), Pat::Ident(_)) {
+                    errors.push(Error::new_spanned(
+                        &typed.pat,
+                        "method arguments must use simple identifier patterns",
+                    ));
+                }
+            }
+        }
+    }
 }
 
 fn validate_receiver(receiver: &Receiver, errors: &mut Vec<Error>) -> Option<ReceiverKind> {

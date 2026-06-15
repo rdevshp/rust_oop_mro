@@ -59,7 +59,9 @@ pub(crate) fn rewrite_all_super_calls(graph: &mut Graph, errors: &mut Vec<Error>
                     rewriter.visit_block_mut(&mut constructor.body);
                     errors.extend(rewriter.errors);
                 }
-                ClassItem::Field(_) => {}
+                ClassItem::Field(_)
+                | ClassItem::AssociatedConst(_)
+                | ClassItem::UnsupportedAssociatedType(_) => {}
             }
         }
     }

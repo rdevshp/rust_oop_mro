@@ -110,6 +110,8 @@ pub(crate) enum ClassItem {
     Field(FieldDef),
     Method(MethodDef),
     Constructor(ConstructorDef),
+    AssociatedConst(AssociatedConstDef),
+    UnsupportedAssociatedType(AssociatedTypeDef),
 }
 
 impl Parse for ClassItem {
@@ -128,6 +130,22 @@ impl Parse for ClassItem {
             fork.parse::<Token![virtual]>()?;
         }
 
+        if fork.peek(Token![type]) {
+            return input.parse().map(Self::UnsupportedAssociatedType);
+        }
+
+        if fork.peek(Token![const]) {
+            let after_const = fork.fork();
+            after_const.parse::<Token![const]>()?;
+            if !(after_const.peek(Token![fn])
+                || after_const.peek(Token![async])
+                || after_const.peek(Token![unsafe])
+                || after_const.peek(Token![extern]))
+            {
+                return input.parse().map(Self::AssociatedConst);
+            }
+        }
+
         if fork.peek(Token![fn])
             || fork.peek(Token![async])
             || fork.peek(Token![const])
@@ -138,6 +156,69 @@ impl Parse for ClassItem {
         }
 
         input.parse().map(Self::Field)
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct AssociatedConstDef {
+    pub(crate) item: syn::ImplItemConst,
+    pub(crate) is_override: bool,
+}
+
+impl Parse for AssociatedConstDef {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        let parsed_attrs = parse_oop_attrs(input)?;
+        let vis: Visibility = input.parse()?;
+        let const_token = input.parse::<Token![const]>()?;
+        let ident: Ident = input.parse()?;
+        let generics: Generics = input.parse()?;
+        let colon_token = input.parse::<Token![:]>()?;
+        let ty: Type = input.parse()?;
+        let eq_token = input.parse::<Token![=]>()?;
+        let expr: Expr = input.parse()?;
+        let semi_token = input.parse::<Token![;]>()?;
+
+        Ok(Self {
+            item: syn::ImplItemConst {
+                attrs: parsed_attrs.attrs,
+                vis,
+                defaultness: None,
+                const_token,
+                ident,
+                generics,
+                colon_token,
+                ty,
+                eq_token,
+                expr,
+                semi_token,
+            },
+            is_override: parsed_attrs.is_override,
+        })
+    }
+}
+
+impl ToTokens for AssociatedConstDef {
+    fn to_tokens(&self, tokens: &mut TokenStream2) {
+        self.item.to_tokens(tokens);
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct AssociatedTypeDef {
+    pub(crate) item: syn::ImplItemType,
+    pub(crate) is_override: bool,
+}
+
+impl Parse for AssociatedTypeDef {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        let parsed_attrs = parse_oop_attrs(input)?;
+        let mut item: syn::ImplItemType = input.parse()?;
+        item.attrs = parsed_attrs.attrs;
+
+        Ok(Self {
+            item,
+            is_override: parsed_attrs.is_override,
+        })
     }
 }
 

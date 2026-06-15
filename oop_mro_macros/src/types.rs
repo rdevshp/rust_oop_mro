@@ -176,7 +176,10 @@ pub(crate) fn generics_with_async_lifetime(generics: &Generics) -> Generics {
 pub(crate) fn class_constructors(class: &ClassDef) -> impl Iterator<Item = &ConstructorDef> {
     class.items.iter().filter_map(|item| match item {
         crate::ast::ClassItem::Constructor(constructor) => Some(constructor),
-        crate::ast::ClassItem::Field(_) | crate::ast::ClassItem::Method(_) => None,
+        crate::ast::ClassItem::Field(_)
+        | crate::ast::ClassItem::Method(_)
+        | crate::ast::ClassItem::AssociatedConst(_)
+        | crate::ast::ClassItem::UnsupportedAssociatedType(_) => None,
     })
 }
 

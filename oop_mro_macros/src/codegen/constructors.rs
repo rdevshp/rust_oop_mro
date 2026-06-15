@@ -119,6 +119,8 @@ pub(super) fn generate_default_base_impl(
         }
         ClassItem::Method(_) => None,
         ClassItem::Constructor(_) => None,
+        ClassItem::AssociatedConst(_) => None,
+        ClassItem::UnsupportedAssociatedType(_) => None,
     });
 
     quote! {

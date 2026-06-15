@@ -4,7 +4,7 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote, ToTokens};
 use syn::{parse_quote, GenericParam, Generics, Ident, Type};
 
-use crate::ast::{ClassDef, ClassItem, ConstructorDef, MethodDef};
+use crate::ast::{AssociatedConstDef, ClassDef, ClassItem, ConstructorDef, MethodDef};
 use crate::generics::{
     async_output_type_with_substitutions, method_signature_key_in_context, substitute_type,
     substituted_return_type, substitutions_from_context,

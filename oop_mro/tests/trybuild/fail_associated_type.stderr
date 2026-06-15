@@ -1,0 +1,5 @@
+error: associated types in class bodies are not supported because Rust inherent associated types are unstable
+ --> tests/trybuild/fail_associated_type.rs:5:14
+  |
+5 |         type Item = usize;
+  |              ^^^^

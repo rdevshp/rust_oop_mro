@@ -1,0 +1,5 @@
+error: methods must have a `&self` or `&mut self` receiver
+ --> tests/trybuild/fail_virtual_static_method.rs:5:17
+  |
+5 |         virtual fn make() -> usize {
+  |                 ^^^^^^^^^^^^^^^^^^

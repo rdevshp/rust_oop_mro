@@ -255,6 +255,23 @@ oop_class! {
             &self.value
         }
     }
+
+    class StaticUtility {
+        const DEFAULT: usize = 41;
+        pub const PUBLIC: usize = 42;
+
+        fn default_value() -> usize {
+            Self::DEFAULT
+        }
+
+        fn public_value() -> usize {
+            Self::PUBLIC
+        }
+
+        fn pair<T>(left: T, right: T) -> (T, T) {
+            (left, right)
+        }
+    }
 }
 
 const CONST_VALUE: ConstValue<usize> = ConstValue { value: 17 };
@@ -526,4 +543,13 @@ fn supports_const_direct_methods() {
     assert_eq!(*CONST_GET, 17);
     assert_eq!(CONST_PASSTHROUGH, 23);
     assert_eq!(*CONST_UNCHECKED, 17);
+}
+
+#[test]
+fn supports_static_methods_and_associated_constants() {
+    assert_eq!(StaticUtility::DEFAULT, 41);
+    assert_eq!(StaticUtility::PUBLIC, 42);
+    assert_eq!(StaticUtility::default_value(), 41);
+    assert_eq!(StaticUtility::public_value(), 42);
+    assert_eq!(StaticUtility::pair("left", "right"), ("left", "right"));
 }
