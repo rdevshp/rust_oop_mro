@@ -114,8 +114,10 @@ fn main() {
         */
     }
 
-    let animals: Vec<Box<dyn AsAnimal>> =
-        vec![Box::new(Dog::new(String::from("Dog2"))), Box::new(Kangaroo::new(String::from("Kangaroo2")))];
+    let animals: Vec<Box<dyn AsAnimal>> = vec![
+        Box::new(Dog::new(String::from("Dog2"))),
+        Box::new(Kangaroo::new(String::from("Kangaroo2"))),
+    ];
 
     for object in &animals {
         let animal: &Animal = object.as_animal();

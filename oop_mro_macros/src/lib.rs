@@ -7,8 +7,9 @@ use syn::punctuated::Punctuated;
 use syn::visit_mut::{self, VisitMut};
 use syn::{
     braced, bracketed, parenthesized, parse_macro_input, parse_quote, Attribute, Block, Error,
-    Expr, ExprMacro, FnArg, Ident, Lifetime, Pat, Receiver, ReturnType, Signature, Token, Type,
-    TypeReference, Visibility,
+    Expr, ExprMacro, FnArg, GenericArgument, GenericParam, Generics, Ident, Lifetime, Pat,
+    PathArguments, Receiver, ReturnType, Signature, Token, Type, TypePath, TypeReference,
+    Visibility,
 };
 
 mod c3;
@@ -56,7 +57,8 @@ struct ClassDef {
     vis: Visibility,
     is_abstract: bool,
     name: Ident,
-    bases: Vec<Ident>,
+    generics: Generics,
+    bases: Vec<BaseSpec>,
     items: Vec<ClassItem>,
 }
 
@@ -72,13 +74,17 @@ impl Parse for ClassDef {
         };
         input.parse::<kw::class>()?;
         let name: Ident = input.parse()?;
+        let mut generics: Generics = input.parse()?;
         let bases = if input.peek(Token![:]) {
             input.parse::<Token![:]>()?;
-            let bases = Punctuated::<Ident, Token![,]>::parse_separated_nonempty(input)?;
+            let bases = Punctuated::<BaseSpec, Token![,]>::parse_separated_nonempty(input)?;
             bases.into_iter().collect()
         } else {
             Vec::new()
         };
+        if generics.where_clause.is_none() && input.peek(Token![where]) {
+            generics.where_clause = Some(input.parse()?);
+        }
 
         let content;
         braced!(content in input);
@@ -93,8 +99,34 @@ impl Parse for ClassDef {
             vis,
             is_abstract,
             name,
+            generics,
             bases,
             items,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+struct BaseSpec {
+    name: Ident,
+    ty: Type,
+}
+
+impl Parse for BaseSpec {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        let ty_path: TypePath = input.parse()?;
+
+        if ty_path.qself.is_some() || ty_path.path.segments.len() != 1 {
+            return Err(Error::new_spanned(
+                ty_path,
+                "base classes must be declared as `Base` or `Base<...>`",
+            ));
+        }
+
+        let name = ty_path.path.segments[0].ident.clone();
+        Ok(Self {
+            name,
+            ty: Type::Path(ty_path),
         })
     }
 }
@@ -341,7 +373,6 @@ struct MethodInfo {
     receiver: ReceiverKind,
     arg_idents: Vec<Ident>,
     arg_types: Vec<Type>,
-    signature_key: String,
     signature_display: String,
 }
 
@@ -426,17 +457,17 @@ fn validate_and_build(block: OopBlock, errors: &mut Vec<Error>) -> Graph {
     for (index, class) in classes.iter().enumerate() {
         let mut seen_bases = HashSet::new();
         for base in &class.bases {
-            let base_name = base.to_string();
+            let base_name = base.name.to_string();
             let Some(&base_index) = name_to_index.get(&base_name) else {
                 errors.push(Error::new_spanned(
-                    base,
+                    &base.name,
                     format!("unknown base class `{base_name}`"),
                 ));
                 continue;
             };
             if !seen_bases.insert(base_name.clone()) {
                 errors.push(Error::new_spanned(
-                    base,
+                    &base.name,
                     format!("duplicate base class `{base_name}`"),
                 ));
                 continue;
@@ -467,7 +498,7 @@ fn validate_and_build(block: OopBlock, errors: &mut Vec<Error>) -> Graph {
     };
 
     let (selected_methods, abstract_methods) = if errors.is_empty() {
-        resolve_methods(&classes, &mros, &direct_methods, errors)
+        resolve_methods(&classes, &bases, &mros, &direct_methods, errors)
     } else {
         (
             vec![BTreeMap::new(); classes.len()],
@@ -717,13 +748,13 @@ fn analyze_method(owner: usize, method: &MethodDef) -> Result<MethodInfo, Vec<Er
             "extern methods are not supported",
         ));
     }
-    if sig.generics.lt_token.is_some()
+    let has_method_generics = sig.generics.lt_token.is_some()
         || !sig.generics.params.is_empty()
-        || sig.generics.where_clause.is_some()
-    {
+        || sig.generics.where_clause.is_some();
+    if method.is_virtual && has_method_generics {
         errors.push(Error::new_spanned(
             &sig.generics,
-            "generic methods and where clauses are not supported",
+            "generic virtual methods and virtual method where clauses are not supported",
         ));
     }
     if sig.variadic.is_some() {
@@ -754,7 +785,6 @@ fn analyze_method(owner: usize, method: &MethodDef) -> Result<MethodInfo, Vec<Er
 
     let mut arg_idents = Vec::new();
     let mut arg_types = Vec::new();
-    let mut arg_type_keys = Vec::new();
     for arg in sig.inputs.iter().skip(1) {
         match arg {
             FnArg::Receiver(receiver) => errors.push(Error::new_spanned(
@@ -764,7 +794,6 @@ fn analyze_method(owner: usize, method: &MethodDef) -> Result<MethodInfo, Vec<Er
             FnArg::Typed(typed) => match typed.pat.as_ref() {
                 Pat::Ident(pat_ident) => {
                     arg_idents.push(pat_ident.ident.clone());
-                    arg_type_keys.push(typed.ty.to_token_stream().to_string());
                     arg_types.push((*typed.ty).clone());
                 }
                 pattern => errors.push(Error::new_spanned(
@@ -783,24 +812,6 @@ fn analyze_method(owner: usize, method: &MethodDef) -> Result<MethodInfo, Vec<Er
         return Err(errors);
     }
 
-    let output = match &sig.output {
-        ReturnType::Default => String::new(),
-        ReturnType::Type(_, ty) => ty.to_token_stream().to_string(),
-    };
-    let unsafety = if sig.unsafety.is_some() {
-        "unsafe"
-    } else {
-        "safe"
-    };
-    let asyncness = if sig.asyncness.is_some() {
-        "async"
-    } else {
-        "sync"
-    };
-    let signature_key = format!(
-        "{asyncness}|{unsafety}|{receiver:?}|{}|{output}",
-        arg_type_keys.join(",")
-    );
     let signature_display = sig.to_token_stream().to_string();
 
     Ok(MethodInfo {
@@ -814,7 +825,6 @@ fn analyze_method(owner: usize, method: &MethodDef) -> Result<MethodInfo, Vec<Er
         receiver,
         arg_idents,
         arg_types,
-        signature_key,
         signature_display,
     })
 }
@@ -850,8 +860,188 @@ fn public_if_inherited(vis: &Visibility) -> Visibility {
     }
 }
 
+#[derive(Default)]
+struct GenericSubstitutions {
+    types: HashMap<String, Type>,
+    lifetimes: HashMap<String, Lifetime>,
+    consts: HashMap<String, Expr>,
+}
+
+fn method_signature_key_in_context(
+    classes: &[ClassDef],
+    bases: &[Vec<usize>],
+    mros: &[Vec<usize>],
+    context: usize,
+    method: &MethodInfo,
+) -> String {
+    let substitutions = substitutions_from_context(classes, bases, mros, context, method.owner);
+    let arg_type_keys = method
+        .arg_types
+        .iter()
+        .map(|ty| {
+            substitute_type(ty, &substitutions)
+                .to_token_stream()
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    let output = match &method.sig.output {
+        ReturnType::Default => String::new(),
+        ReturnType::Type(_, ty) => substitute_type(ty, &substitutions)
+            .to_token_stream()
+            .to_string(),
+    };
+    let unsafety = if method.sig.unsafety.is_some() {
+        "unsafe"
+    } else {
+        "safe"
+    };
+    let asyncness = if method.sig.asyncness.is_some() {
+        "async"
+    } else {
+        "sync"
+    };
+
+    format!(
+        "{asyncness}|{unsafety}|{:?}|{}|{output}",
+        method.receiver,
+        arg_type_keys.join(",")
+    )
+}
+
+fn substitutions_from_context(
+    classes: &[ClassDef],
+    bases: &[Vec<usize>],
+    mros: &[Vec<usize>],
+    start: usize,
+    target: usize,
+) -> GenericSubstitutions {
+    if start == target {
+        return GenericSubstitutions::default();
+    }
+
+    let Some(path) = find_base_path_in(bases, mros, start, target) else {
+        return GenericSubstitutions::default();
+    };
+
+    let mut current = start;
+    let mut substitutions = GenericSubstitutions::default();
+    for next in path {
+        let Some(base_spec) = classes[current]
+            .bases
+            .iter()
+            .find(|base| base.name == classes[next].name)
+        else {
+            return GenericSubstitutions::default();
+        };
+        let actual_base = substitute_type(&base_spec.ty, &substitutions);
+        substitutions = substitutions_for_class_type(&classes[next], &actual_base);
+        current = next;
+    }
+
+    substitutions
+}
+
+fn substitutions_for_class_type(class: &ClassDef, ty: &Type) -> GenericSubstitutions {
+    let mut substitutions = GenericSubstitutions::default();
+    let Some(arguments) = class_type_arguments(ty) else {
+        return substitutions;
+    };
+
+    for (param, argument) in class.generics.params.iter().zip(arguments) {
+        match (param, argument) {
+            (GenericParam::Type(param), GenericArgument::Type(ty)) => {
+                substitutions
+                    .types
+                    .insert(param.ident.to_string(), ty.clone());
+            }
+            (GenericParam::Lifetime(param), GenericArgument::Lifetime(lifetime)) => {
+                substitutions
+                    .lifetimes
+                    .insert(param.lifetime.ident.to_string(), lifetime.clone());
+            }
+            (GenericParam::Const(param), GenericArgument::Const(expr)) => {
+                substitutions
+                    .consts
+                    .insert(param.ident.to_string(), expr.clone());
+            }
+            _ => {}
+        }
+    }
+
+    substitutions
+}
+
+fn class_type_arguments(ty: &Type) -> Option<&Punctuated<GenericArgument, Token![,]>> {
+    let Type::Path(ty_path) = ty else {
+        return None;
+    };
+    if ty_path.qself.is_some() || ty_path.path.segments.len() != 1 {
+        return None;
+    }
+
+    match &ty_path.path.segments[0].arguments {
+        PathArguments::AngleBracketed(arguments) => Some(&arguments.args),
+        PathArguments::None | PathArguments::Parenthesized(_) => None,
+    }
+}
+
+fn substitute_type(ty: &Type, substitutions: &GenericSubstitutions) -> Type {
+    let mut ty = ty.clone();
+    let mut substituter = GenericSubstituter { substitutions };
+    substituter.visit_type_mut(&mut ty);
+    ty
+}
+
+struct GenericSubstituter<'a> {
+    substitutions: &'a GenericSubstitutions,
+}
+
+impl VisitMut for GenericSubstituter<'_> {
+    fn visit_type_mut(&mut self, node: &mut Type) {
+        if let Type::Path(path) = node {
+            if path.qself.is_none() && path.path.segments.len() == 1 {
+                let segment = &path.path.segments[0];
+                if matches!(segment.arguments, PathArguments::None) {
+                    if let Some(replacement) =
+                        self.substitutions.types.get(&segment.ident.to_string())
+                    {
+                        *node = replacement.clone();
+                        return;
+                    }
+                }
+            }
+        }
+
+        visit_mut::visit_type_mut(self, node);
+    }
+
+    fn visit_lifetime_mut(&mut self, node: &mut Lifetime) {
+        if let Some(replacement) = self.substitutions.lifetimes.get(&node.ident.to_string()) {
+            *node = replacement.clone();
+            return;
+        }
+
+        visit_mut::visit_lifetime_mut(self, node);
+    }
+
+    fn visit_expr_mut(&mut self, node: &mut Expr) {
+        if let Expr::Path(path) = node {
+            if path.qself.is_none() && path.path.segments.len() == 1 {
+                let ident = path.path.segments[0].ident.to_string();
+                if let Some(replacement) = self.substitutions.consts.get(&ident) {
+                    *node = replacement.clone();
+                    return;
+                }
+            }
+        }
+
+        visit_mut::visit_expr_mut(self, node);
+    }
+}
+
 fn resolve_methods(
     classes: &[ClassDef],
+    bases: &[Vec<usize>],
     mros: &[Vec<usize>],
     direct_methods: &[MethodMap],
     errors: &mut Vec<Error>,
@@ -874,6 +1064,9 @@ fn resolve_methods(
         }
 
         for name in seen_names {
+            let signature_key = |method: &MethodInfo| {
+                method_signature_key_in_context(classes, bases, mros, class_index, method)
+            };
             let declarations: Vec<_> = mro
                 .iter()
                 .filter_map(|&mro_class| direct_methods[mro_class].get(&name))
@@ -905,8 +1098,9 @@ fn resolve_methods(
                 }
 
                 if current.is_abstract {
+                    let current_key = signature_key(current);
                     for inherited in declarations.iter().skip(1) {
-                        if current.signature_key != inherited.signature_key {
+                        if current_key != signature_key(inherited) {
                             errors.push(Error::new_spanned(
                                 &classes[class_index].name,
                                 format!(
@@ -919,8 +1113,9 @@ fn resolve_methods(
                     }
                     unresolved_abstract.insert(name, current.clone());
                 } else {
+                    let current_key = signature_key(current);
                     for inherited in declarations.iter().skip(1) {
-                        if current.signature_key != inherited.signature_key {
+                        if current_key != signature_key(inherited) {
                             errors.push(Error::new_spanned(
                                 &current.name,
                                 format!(
@@ -948,8 +1143,9 @@ fn resolve_methods(
                 .collect();
 
             if let Some(selected_impl) = concrete_methods.first() {
+                let selected_key = signature_key(selected_impl);
                 for other in concrete_methods.iter().skip(1) {
-                    if selected_impl.signature_key != other.signature_key {
+                    if selected_key != signature_key(other) {
                         errors.push(Error::new_spanned(
                             &classes[class_index].name,
                             format!(
@@ -962,7 +1158,7 @@ fn resolve_methods(
                 }
 
                 for abstract_method in &abstract_methods {
-                    if selected_impl.signature_key != abstract_method.signature_key {
+                    if selected_key != signature_key(abstract_method) {
                         errors.push(Error::new_spanned(
                             &classes[class_index].name,
                             format!(
@@ -977,8 +1173,9 @@ fn resolve_methods(
 
                 selected.insert(name, (*selected_impl).clone());
             } else if let Some(required_method) = abstract_methods.first() {
+                let required_key = signature_key(required_method);
                 for other in abstract_methods.iter().skip(1) {
-                    if required_method.signature_key != other.signature_key {
+                    if required_key != signature_key(other) {
                         errors.push(Error::new_spanned(
                             &classes[class_index].name,
                             format!(
@@ -1285,17 +1482,18 @@ fn generate_struct(graph: &Graph, index: usize, class: &ClassDef) -> TokenStream
     let attrs = &class.attrs;
     let vis = public_if_inherited(&class.vis);
     let name = &class.name;
+    let generics = &class.generics;
     let vtable_field = has_virtual_interface(graph, index).then(|| {
-        let vtable_name = vtable_ident(&graph.names[index]);
+        let vtable_ty = vtable_type_for_class(graph, index);
         quote! {
-            __oop_vtable: &'static #vtable_name,
+            __oop_vtable: #vtable_ty,
         }
     });
-    let base_fields = graph.bases[index].iter().map(|&base| {
-        let field = base_field_ident(&graph.names[base]);
-        let base_ident = &graph.classes[base].name;
+    let base_fields = class.bases.iter().map(|base| {
+        let field = base_field_ident(&base.name.to_string());
+        let base_ty = &base.ty;
         quote! {
-            #field: #base_ident
+            #field: #base_ty
         }
     });
     let fields = class.items.iter().filter_map(|item| match item {
@@ -1307,7 +1505,7 @@ fn generate_struct(graph: &Graph, index: usize, class: &ClassDef) -> TokenStream
     quote! {
         #(#attrs)*
         #[repr(C)]
-        #vis struct #name {
+        #vis struct #name #generics {
             #vtable_field
             #(#base_fields,)*
             #(#fields,)*
@@ -1317,6 +1515,7 @@ fn generate_struct(graph: &Graph, index: usize, class: &ClassDef) -> TokenStream
 
 fn generate_impls(graph: &Graph, index: usize, class: &ClassDef) -> TokenStream2 {
     let name = &class.name;
+    let (impl_generics, ty_generics, where_clause) = class.generics.split_for_impl();
     let metadata_impl = generate_metadata_impl(graph, index, class);
     let default_impl = generate_default_impl(graph, index, class);
     let default_base_impl = generate_default_base_impl(graph, index, class);
@@ -1338,14 +1537,14 @@ fn generate_impls(graph: &Graph, index: usize, class: &ClassDef) -> TokenStream2
     });
     let virtual_wrappers = interface_methods(graph, index)
         .into_iter()
-        .map(|method| generate_virtual_wrapper(&method));
+        .map(|method| generate_virtual_wrapper(graph, index, &method));
 
     quote! {
         #metadata_impl
 
         #default_base_impl
 
-        impl #name {
+        impl #impl_generics #name #ty_generics #where_clause {
             #vtable_init
             #accessors
             #constructor_hook
@@ -1361,7 +1560,8 @@ fn generate_impls(graph: &Graph, index: usize, class: &ClassDef) -> TokenStream2
 
 fn generate_vtable_struct(graph: &Graph, index: usize, class: &ClassDef) -> TokenStream2 {
     let vtable_name = vtable_ident(&graph.names[index]);
-    let class_name = &class.name;
+    let generics = &class.generics;
+    let class_ty = class_type_tokens(class);
     let fields = interface_methods(graph, index).into_iter().map(|method| {
         let field = vtable_field_ident(&method.name);
         let unsafety = &method.sig.unsafety;
@@ -1369,8 +1569,8 @@ fn generate_vtable_struct(graph: &Graph, index: usize, class: &ClassDef) -> Toke
         if method.sig.asyncness.is_some() {
             let lifetime = async_dispatch_lifetime();
             let receiver = match method.receiver {
-                ReceiverKind::Shared => quote! { &#lifetime #class_name },
-                ReceiverKind::Mutable => quote! { &#lifetime mut #class_name },
+                ReceiverKind::Shared => quote! { &#lifetime #class_ty },
+                ReceiverKind::Mutable => quote! { &#lifetime mut #class_ty },
             };
             let arg_types = method
                 .arg_types
@@ -1385,8 +1585,8 @@ fn generate_vtable_struct(graph: &Graph, index: usize, class: &ClassDef) -> Toke
             }
         } else {
             let receiver = match method.receiver {
-                ReceiverKind::Shared => quote! { &#class_name },
-                ReceiverKind::Mutable => quote! { &mut #class_name },
+                ReceiverKind::Shared => quote! { &#class_ty },
+                ReceiverKind::Mutable => quote! { &mut #class_ty },
             };
             let arg_types = &method.arg_types;
             let output = &method.sig.output;
@@ -1398,7 +1598,7 @@ fn generate_vtable_struct(graph: &Graph, index: usize, class: &ClassDef) -> Toke
     });
 
     quote! {
-        struct #vtable_name {
+        struct #vtable_name #generics {
             #(#fields,)*
         }
     }
@@ -1413,6 +1613,52 @@ fn async_output_type(sig: &Signature, lifetime: &Lifetime) -> TokenStream2 {
         ReturnType::Default => quote! { () },
         ReturnType::Type(_, ty) => type_with_elided_refs_lifetime(ty, lifetime).to_token_stream(),
     }
+}
+
+fn async_output_type_with_substitutions(
+    sig: &Signature,
+    lifetime: &Lifetime,
+    substitutions: &GenericSubstitutions,
+) -> TokenStream2 {
+    match &sig.output {
+        ReturnType::Default => quote! { () },
+        ReturnType::Type(_, ty) => {
+            let ty = substitute_type(ty, substitutions);
+            type_with_elided_refs_lifetime(&ty, lifetime).to_token_stream()
+        }
+    }
+}
+
+fn substituted_return_type(
+    output: &ReturnType,
+    substitutions: &GenericSubstitutions,
+) -> ReturnType {
+    match output {
+        ReturnType::Default => ReturnType::Default,
+        ReturnType::Type(arrow, ty) => {
+            ReturnType::Type(*arrow, Box::new(substitute_type(ty, substitutions)))
+        }
+    }
+}
+
+fn signature_in_context(graph: &Graph, context: usize, method: &MethodInfo) -> Signature {
+    let substitutions = substitutions_from_context(
+        &graph.classes,
+        &graph.bases,
+        &graph.mros,
+        context,
+        method.owner,
+    );
+    let mut sig = method.sig.clone();
+
+    for input in &mut sig.inputs {
+        if let FnArg::Typed(typed) = input {
+            *typed.ty = substitute_type(&typed.ty, &substitutions);
+        }
+    }
+    sig.output = substituted_return_type(&sig.output, &substitutions);
+
+    sig
 }
 
 fn boxed_future_type(output: TokenStream2, lifetime: &Lifetime) -> TokenStream2 {
@@ -1449,14 +1695,15 @@ impl VisitMut for ElidedReferenceLifetimeBinder<'_> {
 fn generate_base_cast_trait(graph: &Graph, index: usize, class: &ClassDef) -> TokenStream2 {
     let vis = public_if_inherited(&class.vis);
     let trait_name = base_cast_trait_ident(&graph.names[index]);
-    let class_name = &class.name;
+    let generics = &class.generics;
+    let class_ty = class_type_tokens(class);
     let shared_name = base_cast_method_ident(&graph.names[index], false);
     let mutable_name = base_cast_method_ident(&graph.names[index], true);
 
     quote! {
-        #vis trait #trait_name {
-            fn #shared_name(&self) -> &#class_name;
-            fn #mutable_name(&mut self) -> &mut #class_name;
+        #vis trait #trait_name #generics {
+            fn #shared_name(&self) -> &#class_ty;
+            fn #mutable_name(&mut self) -> &mut #class_ty;
         }
     }
 }
@@ -1486,9 +1733,10 @@ fn generate_base_cast_impl(
     base_index: usize,
     class: &ClassDef,
 ) -> TokenStream2 {
-    let class_name = &class.name;
-    let base_name = &graph.classes[base_index].name;
-    let trait_name = base_cast_trait_ident(&graph.names[base_index]);
+    let (impl_generics, _, where_clause) = class.generics.split_for_impl();
+    let class_ty = class_type_tokens(class);
+    let base_ty = ancestor_type(graph, class_index, base_index);
+    let trait_path = base_cast_trait_for_actual_class(graph, base_index, &base_ty);
     let shared_name = base_cast_method_ident(&graph.names[base_index], false);
     let mutable_name = base_cast_method_ident(&graph.names[base_index], true);
     let shared_body = if class_index == base_index {
@@ -1503,12 +1751,12 @@ fn generate_base_cast_impl(
     };
 
     quote! {
-        impl #trait_name for #class_name {
-            fn #shared_name(&self) -> &#base_name {
+        impl #impl_generics #trait_path for #class_ty #where_clause {
+            fn #shared_name(&self) -> &#base_ty {
                 #shared_body
             }
 
-            fn #mutable_name(&mut self) -> &mut #base_name {
+            fn #mutable_name(&mut self) -> &mut #base_ty {
                 #mutable_body
             }
         }
@@ -1527,6 +1775,93 @@ fn interface_methods(graph: &Graph, index: usize) -> Vec<MethodInfo> {
     }
 
     methods.into_values().collect()
+}
+
+fn class_type(class: &ClassDef) -> Type {
+    let name = &class.name;
+    let (_, ty_generics, _) = class.generics.split_for_impl();
+    parse_quote!(#name #ty_generics)
+}
+
+fn class_type_tokens(class: &ClassDef) -> TokenStream2 {
+    let ty = class_type(class);
+    quote! { #ty }
+}
+
+fn ancestor_type(graph: &Graph, start: usize, target: usize) -> Type {
+    ancestor_type_in(&graph.classes, &graph.bases, &graph.mros, start, target)
+}
+
+fn ancestor_type_in(
+    classes: &[ClassDef],
+    bases: &[Vec<usize>],
+    mros: &[Vec<usize>],
+    start: usize,
+    target: usize,
+) -> Type {
+    if start == target {
+        return class_type(&classes[start]);
+    }
+
+    let Some(path) = find_base_path_in(bases, mros, start, target) else {
+        return class_type(&classes[target]);
+    };
+
+    let mut current = start;
+    let mut substitutions = GenericSubstitutions::default();
+    let mut actual = class_type(&classes[target]);
+    for next in path {
+        let Some(base_spec) = classes[current]
+            .bases
+            .iter()
+            .find(|base| base.name == classes[next].name)
+        else {
+            return actual;
+        };
+        actual = substitute_type(&base_spec.ty, &substitutions);
+        substitutions = substitutions_for_class_type(&classes[next], &actual);
+        current = next;
+    }
+
+    actual
+}
+
+fn vtable_type_for_class(graph: &Graph, index: usize) -> TokenStream2 {
+    let vtable_name = vtable_ident(&graph.names[index]);
+    let (_, ty_generics, _) = graph.classes[index].generics.split_for_impl();
+    quote! { #vtable_name #ty_generics }
+}
+
+fn vtable_type_for_actual_class(graph: &Graph, class_index: usize, actual: &Type) -> TokenStream2 {
+    type_with_replaced_ident(actual, vtable_ident(&graph.names[class_index]))
+}
+
+fn base_cast_trait_for_actual_class(
+    graph: &Graph,
+    class_index: usize,
+    actual: &Type,
+) -> TokenStream2 {
+    type_with_replaced_ident(actual, base_cast_trait_ident(&graph.names[class_index]))
+}
+
+fn type_with_replaced_ident(ty: &Type, ident: Ident) -> TokenStream2 {
+    let mut ty = ty.clone();
+    if let Type::Path(path) = &mut ty {
+        if path.qself.is_none() && path.path.segments.len() == 1 {
+            path.path.segments[0].ident = ident;
+        }
+    }
+
+    quote! { #ty }
+}
+
+fn generics_with_async_lifetime(generics: &Generics) -> Generics {
+    let mut generics = generics.clone();
+    let lifetime = async_dispatch_lifetime();
+    generics
+        .params
+        .insert(0, GenericParam::Lifetime(parse_quote!(#lifetime)));
+    generics
 }
 
 fn class_constructors(class: &ClassDef) -> impl Iterator<Item = &ConstructorDef> {
@@ -1594,8 +1929,12 @@ fn generate_vtable_for_class_as(
     vtable_slot: VtableSlot,
 ) -> TokenStream2 {
     let vtable_index = vtable_slot.ancestor;
-    let vtable_type = vtable_ident(&graph.names[vtable_index]);
-    let vtable_static = vtable_static_ident(graph, class_index, &vtable_slot);
+    let class = &graph.classes[class_index];
+    let (impl_generics, _, where_clause) = class.generics.split_for_impl();
+    let actual_vtable_class = ancestor_type(graph, class_index, vtable_index);
+    let vtable_type = vtable_type_for_actual_class(graph, vtable_index, &actual_vtable_class);
+    let vtable_constructor = vtable_ident(&graph.names[vtable_index]);
+    let vtable_factory = vtable_factory_ident(graph, class_index, &vtable_slot);
     let entries = interface_methods(graph, vtable_index)
         .into_iter()
         .map(|method| {
@@ -1610,9 +1949,11 @@ fn generate_vtable_for_class_as(
         .map(|method| generate_vtable_function(graph, class_index, &vtable_slot, &method));
 
     quote! {
-        static #vtable_static: #vtable_type = #vtable_type {
-            #(#entries,)*
-        };
+        fn #vtable_factory #impl_generics () -> #vtable_type #where_clause {
+            #vtable_constructor {
+                #(#entries,)*
+            }
+        }
 
         #(#functions)*
     }
@@ -1629,18 +1970,45 @@ fn generate_vtable_function(
     }
 
     let vtable_index = vtable_slot.ancestor;
+    let class = &graph.classes[class_index];
+    let (impl_generics, _, where_clause) = class.generics.split_for_impl();
     let function = vtable_function_ident(graph, class_index, vtable_slot, &method.name);
-    let receiver_ty = &graph.classes[vtable_index].name;
+    let receiver_ty = ancestor_type(graph, class_index, vtable_index);
     let arg_idents = &method.arg_idents;
-    let arg_types = &method.arg_types;
-    let output = &method.sig.output;
+    let substitutions = substitutions_from_context(
+        &graph.classes,
+        &graph.bases,
+        &graph.mros,
+        class_index,
+        vtable_index,
+    );
+    let arg_types = method
+        .arg_types
+        .iter()
+        .map(|ty| substitute_type(ty, &substitutions))
+        .collect::<Vec<_>>();
+    let output = substituted_return_type(&method.sig.output, &substitutions);
     let unsafety = &method.sig.unsafety;
     let method_name = method.name.to_string();
     let vtable_class_name = &graph.names[vtable_index];
 
     let selected = graph.selected_methods[class_index]
         .get(&method.name.to_string())
-        .filter(|selected| selected.signature_key == method.signature_key);
+        .filter(|selected| {
+            method_signature_key_in_context(
+                &graph.classes,
+                &graph.bases,
+                &graph.mros,
+                class_index,
+                selected,
+            ) == method_signature_key_in_context(
+                &graph.classes,
+                &graph.bases,
+                &graph.mros,
+                class_index,
+                method,
+            )
+        });
 
     match method.receiver {
         ReceiverKind::Shared => {
@@ -1666,7 +2034,10 @@ fn generate_vtable_function(
             };
 
             quote! {
-                #unsafety fn #function(receiver: &#receiver_ty #(, #arg_idents: #arg_types)*) #output {
+                #unsafety fn #function #impl_generics (
+                    receiver: &#receiver_ty
+                    #(, #arg_idents: #arg_types)*
+                ) #output #where_clause {
                     #body
                 }
             }
@@ -1694,7 +2065,10 @@ fn generate_vtable_function(
             };
 
             quote! {
-                #unsafety fn #function(receiver: &mut #receiver_ty #(, #arg_idents: #arg_types)*) #output {
+                #unsafety fn #function #impl_generics (
+                    receiver: &mut #receiver_ty
+                    #(, #arg_idents: #arg_types)*
+                ) #output #where_clause {
                     #body
                 }
             }
@@ -1709,27 +2083,51 @@ fn generate_async_vtable_function(
     method: &MethodInfo,
 ) -> TokenStream2 {
     let vtable_index = vtable_slot.ancestor;
+    let class = &graph.classes[class_index];
+    let function_generics = generics_with_async_lifetime(&class.generics);
+    let (impl_generics, _, where_clause) = function_generics.split_for_impl();
     let function = vtable_function_ident(graph, class_index, vtable_slot, &method.name);
-    let receiver_ty = &graph.classes[vtable_index].name;
+    let receiver_ty = ancestor_type(graph, class_index, vtable_index);
     let arg_idents = &method.arg_idents;
+    let substitutions = substitutions_from_context(
+        &graph.classes,
+        &graph.bases,
+        &graph.mros,
+        class_index,
+        vtable_index,
+    );
+    let lifetime = async_dispatch_lifetime();
     let arg_types = method
         .arg_types
         .iter()
         .map(|ty| {
-            let lifetime = async_dispatch_lifetime();
-            type_with_elided_refs_lifetime(ty, &lifetime)
+            let ty = substitute_type(ty, &substitutions);
+            type_with_elided_refs_lifetime(&ty, &lifetime)
         })
         .collect::<Vec<_>>();
     let unsafety = &method.sig.unsafety;
     let method_name = method.name.to_string();
     let vtable_class_name = &graph.names[vtable_index];
-    let lifetime = async_dispatch_lifetime();
-    let output = async_output_type(&method.sig, &lifetime);
+    let output = async_output_type_with_substitutions(&method.sig, &lifetime, &substitutions);
     let future = boxed_future_type(output, &lifetime);
 
     let selected = graph.selected_methods[class_index]
         .get(&method.name.to_string())
-        .filter(|selected| selected.signature_key == method.signature_key);
+        .filter(|selected| {
+            method_signature_key_in_context(
+                &graph.classes,
+                &graph.bases,
+                &graph.mros,
+                class_index,
+                selected,
+            ) == method_signature_key_in_context(
+                &graph.classes,
+                &graph.bases,
+                &graph.mros,
+                class_index,
+                method,
+            )
+        });
 
     match method.receiver {
         ReceiverKind::Shared => {
@@ -1759,10 +2157,10 @@ fn generate_async_vtable_function(
             };
 
             quote! {
-                #unsafety fn #function<#lifetime>(
+                #unsafety fn #function #impl_generics (
                     receiver: &#lifetime #receiver_ty
                     #(, #arg_idents: #arg_types)*
-                ) -> #future {
+                ) -> #future #where_clause {
                     #body
                 }
             }
@@ -1794,10 +2192,10 @@ fn generate_async_vtable_function(
             };
 
             quote! {
-                #unsafety fn #function<#lifetime>(
+                #unsafety fn #function #impl_generics (
                     receiver: &#lifetime mut #receiver_ty
                     #(, #arg_idents: #arg_types)*
-                ) -> #future {
+                ) -> #future #where_clause {
                     #body
                 }
             }
@@ -1811,7 +2209,7 @@ fn complete_from_receiver_expr(
     path: &[usize],
     mutable: bool,
 ) -> TokenStream2 {
-    let class_name = &graph.classes[class_index].name;
+    let class_ty = class_type_tokens(&graph.classes[class_index]);
     if path.is_empty() {
         return quote! { receiver };
     }
@@ -1821,14 +2219,14 @@ fn complete_from_receiver_expr(
         quote! {
             unsafe {
                 let offset = #offset;
-                &mut *((receiver as *mut _ as *mut u8).sub(offset) as *mut #class_name)
+                &mut *((receiver as *mut _ as *mut u8).sub(offset) as *mut #class_ty)
             }
         }
     } else {
         quote! {
             unsafe {
                 let offset = #offset;
-                &*((receiver as *const _ as *const u8).sub(offset) as *const #class_name)
+                &*((receiver as *const _ as *const u8).sub(offset) as *const #class_ty)
             }
         }
     }
@@ -1876,7 +2274,7 @@ fn offset_expr(graph: &Graph, class_index: usize, path: &[usize]) -> TokenStream
         return quote! { 0usize };
     }
 
-    let class_name = &graph.classes[class_index].name;
+    let class_ty = class_type_tokens(&graph.classes[class_index]);
     let mut field_tokens = TokenStream2::new();
     for &base in path {
         let field = base_field_ident(&graph.names[base]);
@@ -1885,7 +2283,7 @@ fn offset_expr(graph: &Graph, class_index: usize, path: &[usize]) -> TokenStream
 
     quote! {
         {
-            let uninit = ::core::mem::MaybeUninit::<#class_name>::uninit();
+            let uninit = ::core::mem::MaybeUninit::<#class_ty>::uninit();
             let base = uninit.as_ptr();
             unsafe {
                 let field = ::core::ptr::addr_of!((*base)#field_tokens);
@@ -1929,9 +2327,9 @@ fn generate_constructor_new(graph: &Graph, index: usize, class: &ClassDef) -> To
     quote! {
         #(#attrs)*
         #vis fn new(#(#inputs),*) -> Self {
-            let mut value = <Self as #trait_name>::__oop_default_base();
-            value.__oop_ctor(#(#args),*);
-            value
+            let mut __oop_value = <Self as #trait_name>::__oop_default_base();
+            __oop_value.__oop_ctor(#(#args),*);
+            __oop_value
         }
     }
 }
@@ -1984,9 +2382,10 @@ fn constructor_arg_idents(constructor: &ConstructorDef) -> Vec<Ident> {
 
 fn generate_default_base_impl(graph: &Graph, index: usize, class: &ClassDef) -> TokenStream2 {
     let name = &class.name;
+    let (impl_generics, ty_generics, where_clause) = class.generics.split_for_impl();
     let trait_name = default_base_trait_ident(&graph.names[index]);
     let vtable_initializer = has_virtual_interface(graph, index).then(|| {
-        let vtable = vtable_static_ident(
+        let vtable = vtable_factory_ident(
             graph,
             index,
             &VtableSlot {
@@ -1995,15 +2394,15 @@ fn generate_default_base_impl(graph: &Graph, index: usize, class: &ClassDef) -> 
             },
         );
         quote! {
-            __oop_vtable: &#vtable,
+            __oop_vtable: #vtable(),
         }
     });
     let base_initializers = graph.bases[index].iter().map(|&base| {
         let field = base_field_ident(&graph.names[base]);
-        let base_ident = &graph.classes[base].name;
+        let base_ty = ancestor_type(graph, index, base);
         let base_trait = default_base_trait_ident(&graph.names[base]);
         quote! {
-            #field: <#base_ident as #base_trait>::__oop_default_base()
+            #field: <#base_ty as #base_trait>::__oop_default_base()
         }
     });
     let field_initializers = class.items.iter().filter_map(|item| match item {
@@ -2022,7 +2421,7 @@ fn generate_default_base_impl(graph: &Graph, index: usize, class: &ClassDef) -> 
             fn __oop_default_base() -> Self;
         }
 
-        impl #trait_name for #name {
+        impl #impl_generics #trait_name for #name #ty_generics #where_clause {
             fn __oop_default_base() -> Self {
                 let mut value = Self {
                     #vtable_initializer
@@ -2042,9 +2441,10 @@ fn generate_default_impl(graph: &Graph, index: usize, class: &ClassDef) -> Token
     }
 
     let name = &class.name;
+    let (impl_generics, ty_generics, where_clause) = class.generics.split_for_impl();
     let trait_name = default_base_trait_ident(&graph.names[index]);
     quote! {
-        impl ::core::default::Default for #name {
+        impl #impl_generics ::core::default::Default for #name #ty_generics #where_clause {
             fn default() -> Self {
                 <Self as #trait_name>::__oop_default_base()
             }
@@ -2054,11 +2454,11 @@ fn generate_default_impl(graph: &Graph, index: usize, class: &ClassDef) -> Token
 
 fn generate_vtable_init(graph: &Graph, index: usize) -> TokenStream2 {
     let assignments = vtable_slots(graph, index).into_iter().map(|slot| {
-        let vtable = vtable_static_ident(graph, index, &slot);
+        let vtable = vtable_factory_ident(graph, index, &slot);
         let place = place_for_path(graph, &slot.path);
 
         quote! {
-            #place.__oop_vtable = &#vtable;
+            #place.__oop_vtable = #vtable();
         }
     });
 
@@ -2093,8 +2493,8 @@ fn generate_virtual_impl_method(method: &MethodDef) -> Option<TokenStream2> {
     })
 }
 
-fn generate_virtual_wrapper(method: &MethodInfo) -> TokenStream2 {
-    let sig = &method.sig;
+fn generate_virtual_wrapper(graph: &Graph, index: usize, method: &MethodInfo) -> TokenStream2 {
+    let sig = signature_in_context(graph, index, method);
     let vis = &method.vis;
     let field = vtable_field_ident(&method.name);
     let args = &method.arg_idents;
@@ -2128,6 +2528,7 @@ fn generate_virtual_wrapper(method: &MethodInfo) -> TokenStream2 {
 
 fn generate_metadata_impl(graph: &Graph, index: usize, class: &ClassDef) -> TokenStream2 {
     let name_ident = &class.name;
+    let (impl_generics, ty_generics, where_clause) = class.generics.split_for_impl();
     let name = &graph.names[index];
     let mro = graph.mros[index].iter().map(|&mro_index| {
         let mro_name = &graph.names[mro_index];
@@ -2160,7 +2561,7 @@ fn generate_metadata_impl(graph: &Graph, index: usize, class: &ClassDef) -> Toke
     let is_abstract = class.is_abstract;
 
     quote! {
-        impl ::oop_mro::OopClass for #name_ident {
+        impl #impl_generics ::oop_mro::OopClass for #name_ident #ty_generics #where_clause {
             const NAME: &'static str = #name;
             const MRO: &'static [&'static str] = &[#(#mro),*];
             const IS_ABSTRACT: bool = #is_abstract;
@@ -2170,7 +2571,7 @@ fn generate_metadata_impl(graph: &Graph, index: usize, class: &ClassDef) -> Toke
             const ABSTRACT_METHODS: &'static [::oop_mro::MethodEntry] = &[#(#abstract_methods),*];
         }
 
-        impl ::oop_mro::OopObject for #name_ident {
+        impl #impl_generics ::oop_mro::OopObject for #name_ident #ty_generics #where_clause {
             type Class = Self;
         }
     }
@@ -2186,18 +2587,18 @@ fn generate_accessors(graph: &Graph, index: usize, _class: &ClassDef) -> TokenSt
         }
 
         let ancestor_name = &graph.names[ancestor];
-        let ancestor_ident = &graph.classes[ancestor].name;
+        let ancestor_ty = ancestor_type(graph, index, ancestor);
         let shared_name = format_ident!("__oop_as_{}", ancestor_name);
         let mutable_name = format_ident!("__oop_as_mut_{}", ancestor_name);
         let shared_body = accessor_body(graph, index, ancestor, false);
         let mutable_body = accessor_body(graph, index, ancestor, true);
 
         generated.push(quote! {
-            fn #shared_name(&self) -> &#ancestor_ident {
+            fn #shared_name(&self) -> &#ancestor_ty {
                 #shared_body
             }
 
-            fn #mutable_name(&mut self) -> &mut #ancestor_ident {
+            fn #mutable_name(&mut self) -> &mut #ancestor_ty {
                 #mutable_body
             }
         });
@@ -2236,14 +2637,23 @@ fn place_for_path(graph: &Graph, path: &[usize]) -> TokenStream2 {
 }
 
 fn find_base_path(graph: &Graph, start: usize, target: usize) -> Option<Vec<usize>> {
-    for &base in &graph.bases[start] {
+    find_base_path_in(&graph.bases, &graph.mros, start, target)
+}
+
+fn find_base_path_in(
+    bases: &[Vec<usize>],
+    mros: &[Vec<usize>],
+    start: usize,
+    target: usize,
+) -> Option<Vec<usize>> {
+    for &base in &bases[start] {
         if base == target {
             return Some(vec![base]);
         }
 
-        if graph.mros[base].contains(&target) {
+        if mros[base].contains(&target) {
             let mut path = vec![base];
-            path.extend(find_base_path(graph, base, target)?);
+            path.extend(find_base_path_in(bases, mros, base, target)?);
             return Some(path);
         }
     }
@@ -2276,10 +2686,14 @@ fn vtable_ident(name: &str) -> Ident {
     format_ident!("__oop_VTable_{}", name)
 }
 
-fn vtable_static_ident(graph: &Graph, class_index: usize, slot: &VtableSlot) -> Ident {
+fn vtable_factory_ident(graph: &Graph, class_index: usize, slot: &VtableSlot) -> Ident {
     let class_name = &graph.names[class_index];
     let slot_name = vtable_slot_name(graph, slot);
-    format_ident!("__OOP_VTABLE_{}_AS_{}", class_name, slot_name)
+    format_ident!(
+        "__oop_vtable_{}_as_{}",
+        to_snake(class_name),
+        to_snake(&slot_name)
+    )
 }
 
 fn vtable_field_ident(method: &Ident) -> Ident {

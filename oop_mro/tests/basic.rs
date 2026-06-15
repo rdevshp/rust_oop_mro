@@ -202,6 +202,34 @@ oop_class! {
             33
         }
     }
+
+    abstract class GenericSlot<T> {
+        abstract virtual fn get(&self) -> &T;
+
+        fn passthrough<U>(&self, value: U) -> U {
+            value
+        }
+
+        fn cloned(&self, value: T) -> T
+        where
+            T: Clone,
+        {
+            value.clone()
+        }
+    }
+
+    class GenericLeaf<U>: GenericSlot<U> where U: Default {
+        value: U,
+
+        constructor(value: U): GenericSlot() {
+            self.value = value;
+        }
+
+        #[override]
+        virtual fn get(&self) -> &U {
+            &self.value
+        }
+    }
 }
 
 fn block_on<F: Future>(future: F) -> F::Output {
@@ -362,4 +390,17 @@ fn supports_async_direct_and_virtual_methods() {
     assert_eq!(block_on(leaf.as_async_root().label_ref()), "");
     assert_eq!(block_on(roots[0].score("hello")), 15);
     assert_eq!(block_on(concrete.as_async_abstract().load()), 33);
+}
+
+#[test]
+fn supports_generic_classes_and_base_views() {
+    let leaf = GenericLeaf::new("leaf".to_string());
+    let slots: Vec<Box<dyn AsGenericSlot<String>>> =
+        vec![Box::new(GenericLeaf::new("boxed".to_string()))];
+
+    assert_eq!(leaf.get(), "leaf");
+    assert_eq!(leaf.as_generic_slot().get(), "leaf");
+    assert_eq!(leaf.as_generic_slot().passthrough(42usize), 42);
+    assert_eq!(leaf.as_generic_slot().cloned("clone".to_string()), "clone");
+    assert_eq!(slots[0].as_generic_slot().get(), "boxed");
 }
