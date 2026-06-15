@@ -1,4 +1,5 @@
 use oop_mro::prelude::*;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 oop_class! {
     abstract class Animal {
@@ -108,10 +109,8 @@ oop_class! {
         abstract virtual fn create(&mut self) -> T;
     }
     class JobFactory: Factory<Job> {
-        id: u32,
-        constructor() {
-            self.id = 0;
-        }
+        id: u32 = 50,
+        constructor() {}
         #[override]
         virtual fn create(&mut self) -> Job {
             let r = self.id;
@@ -120,6 +119,27 @@ oop_class! {
         }
     }
 }
+
+oop_class! {
+    class TicketRegistry {
+        pub const PREFIX: &'static str = "ticket";
+        const FIRST_ID: usize = 1000;
+        static NEXT_ID: AtomicUsize = AtomicUsize::new(1000);
+
+        fn reset_for_example() {
+            Self::NEXT_ID.store(Self::FIRST_ID, Ordering::Relaxed);
+        }
+
+        fn next_id() -> usize {
+            Self::NEXT_ID.fetch_add(1, Ordering::Relaxed)
+        }
+
+        fn next_label() -> String {
+            format!("{}-{}", Self::PREFIX, Self::next_id())
+        }
+    }
+}
+
 fn main() {
     let dog = Dog::new(String::from("Dog1"));
     let kangaroo = Kangaroo::new(String::from("Kangaroo1"));
@@ -168,6 +188,13 @@ fn main() {
     let mut job_factory = JobFactory::new();
     println!("job id: {:?} ", job_factory.create());
     println!("job id: {:?} ", job_factory.create());
+
+    TicketRegistry::reset_for_example();
+    assert_eq!(TicketRegistry::PREFIX, "ticket");
+    assert_eq!(TicketRegistry::next_label(), "ticket-1000");
+    assert_eq!(TicketRegistry::next_id(), 1001);
+    assert_eq!(TicketRegistry::NEXT_ID.load(Ordering::Relaxed), 1002);
+    println!("next ticket: {}", TicketRegistry::next_label());
 
     // checked downcast
     let factory: Box<dyn AsFactory<Job>> = Box::new(job_factory);
