@@ -96,8 +96,10 @@ oop_class! {
 
 oop_class! {
     class Test {
-        virtual unsafe fn f(&self) {
-            unsafe {}
+        virtual async unsafe fn f(&self) {
+            unsafe {
+                let a = 1;
+            }
         }
     }
 }
@@ -116,6 +118,17 @@ fn main() {
         Kangaroo speaking
         */
     }
+
+    let animals: Vec<Box<dyn AsAnimal>> = vec![
+        Box::new(Dog::default()),
+        Box::new(Kangaroo::default()),
+    ];
+
+    for object in &animals {
+        let animal: &Animal = object.as_animal();
+        println!("{}", animal.name());
+    }
+
 
     assert_eq!(<Document as OopClass>::MRO, &["Document", "Named", "Tagged", "Entity"]);
     println!("{}", Document::default().describe()); // Named -> Entity
