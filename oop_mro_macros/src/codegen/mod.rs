@@ -4,7 +4,9 @@ use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote, ToTokens};
 use syn::{parse_quote, GenericParam, Generics, Ident, Type};
 
-use crate::ast::{AssociatedConstDef, ClassDef, ClassItem, ConstructorDef, MethodDef};
+use crate::ast::{
+    AssociatedConstDef, ClassDef, ClassItem, ConstructorDef, MethodDef, StaticFieldDef,
+};
 use crate::generics::{
     async_output_type_with_substitutions, method_signature_key_in_context, substitute_type,
     substituted_return_type, substitutions_from_context,
@@ -12,9 +14,9 @@ use crate::generics::{
 use crate::model::{Graph, MethodInfo, ReceiverKind, VtableSlot};
 use crate::names::{
     base_cast_method_ident, base_field_ident, default_base_trait_ident, private_module_ident,
-    virtual_impl_ident, vtable_cast_mut_field_ident, vtable_cast_mut_function_ident,
-    vtable_cast_ref_field_ident, vtable_cast_ref_function_ident, vtable_factory_ident,
-    vtable_field_ident, vtable_function_ident, vtable_ident,
+    static_field_ident, virtual_impl_ident, vtable_cast_mut_field_ident,
+    vtable_cast_mut_function_ident, vtable_cast_ref_field_ident, vtable_cast_ref_function_ident,
+    vtable_factory_ident, vtable_field_ident, vtable_function_ident, vtable_ident,
 };
 use crate::types::{
     ancestor_type, async_dispatch_lifetime, async_output_type, base_cast_trait_for_actual_class,
@@ -29,11 +31,13 @@ mod constructors;
 mod downcast;
 mod impls;
 mod metadata;
+mod statics;
 mod structs;
 mod vtables;
 
 pub(crate) fn generate(graph: &Graph) -> TokenStream2 {
     let private_module = structs::generate_private_module(graph);
+    let static_fields = statics::generate_static_fields(graph);
     let vtable_structs = graph
         .classes
         .iter()
@@ -61,6 +65,7 @@ pub(crate) fn generate(graph: &Graph) -> TokenStream2 {
 
     quote! {
         #private_module
+        #static_fields
         #(#vtable_structs)*
         #(#structs)*
         #(#base_cast_traits)*

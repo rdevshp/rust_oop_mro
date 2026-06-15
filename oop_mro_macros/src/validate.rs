@@ -2,11 +2,15 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use proc_macro2::Span;
 use quote::ToTokens;
-use syn::{parse_quote, Error, FnArg, Pat, Receiver, Visibility};
+use syn::visit_mut::{self, VisitMut};
+use syn::{
+    parse_quote, Error, ExprPath, FnArg, GenericParam, Generics, Lifetime, Pat, Receiver, TypePath,
+    Visibility,
+};
 
 use crate::ast::{
     AssociatedConstDef, AssociatedTypeDef, ClassDef, ClassItem, ConstructorDef, FieldDef,
-    MethodDef, OopBlock,
+    MethodDef, OopBlock, StaticFieldDef,
 };
 use crate::c3;
 use crate::generics::method_signature_key_in_context;
@@ -192,6 +196,14 @@ fn collect_direct_methods(classes: &[ClassDef], errors: &mut Vec<Error>) -> Vec<
                 ClassItem::AssociatedConst(associated_const) => {
                     validate_associated_const(associated_const, &mut associated_items, errors);
                 }
+                ClassItem::StaticField(static_field) => {
+                    validate_static_field(
+                        static_field,
+                        &class.generics,
+                        &mut associated_items,
+                        errors,
+                    );
+                }
                 ClassItem::UnsupportedAssociatedType(associated_type) => {
                     validate_unsupported_associated_type(associated_type, errors);
                 }
@@ -253,6 +265,137 @@ fn validate_associated_const(
     }
 }
 
+fn validate_static_field(
+    static_field: &StaticFieldDef,
+    class_generics: &Generics,
+    associated_items: &mut HashSet<String>,
+    errors: &mut Vec<Error>,
+) {
+    let name = static_field.ident.to_string();
+    if static_field.is_override {
+        errors.push(Error::new_spanned(
+            &static_field.ident,
+            "`#[override]` is only allowed on virtual methods",
+        ));
+    }
+    if let Some(mutability) = &static_field.mutability {
+        errors.push(Error::new_spanned(
+            mutability,
+            "mutable static class fields are not supported; use a type with interior mutability such as Atomic*, Mutex, RwLock, or OnceLock",
+        ));
+    }
+    if name.starts_with("__oop_") {
+        errors.push(Error::new_spanned(
+            &static_field.ident,
+            "associated item names starting with `__oop_` are reserved",
+        ));
+    }
+    if !associated_items.insert(name.clone()) {
+        errors.push(Error::new_spanned(
+            &static_field.ident,
+            format!("duplicate associated item `{name}`"),
+        ));
+    }
+
+    validate_static_field_generics(static_field, class_generics, errors);
+}
+
+fn validate_static_field_generics(
+    static_field: &StaticFieldDef,
+    class_generics: &Generics,
+    errors: &mut Vec<Error>,
+) {
+    let mut value_generics = HashSet::new();
+    let mut lifetime_generics = HashSet::new();
+
+    for param in &class_generics.params {
+        match param {
+            GenericParam::Type(param) => {
+                value_generics.insert(param.ident.to_string());
+            }
+            GenericParam::Const(param) => {
+                value_generics.insert(param.ident.to_string());
+            }
+            GenericParam::Lifetime(param) => {
+                lifetime_generics.insert(param.lifetime.ident.to_string());
+            }
+        }
+    }
+
+    if value_generics.is_empty() && lifetime_generics.is_empty() {
+        return;
+    }
+
+    let mut checker = StaticFieldGenericChecker {
+        value_generics,
+        lifetime_generics,
+        reported: HashSet::new(),
+        errors: Vec::new(),
+    };
+    let mut ty = static_field.ty.clone();
+    checker.visit_type_mut(&mut ty);
+    let mut expr = static_field.expr.clone();
+    checker.visit_expr_mut(&mut expr);
+    errors.extend(checker.errors);
+}
+
+struct StaticFieldGenericChecker {
+    value_generics: HashSet<String>,
+    lifetime_generics: HashSet<String>,
+    reported: HashSet<String>,
+    errors: Vec<Error>,
+}
+
+impl StaticFieldGenericChecker {
+    fn check_value_ident(&mut self, ident: &syn::Ident) {
+        let name = ident.to_string();
+        if self.value_generics.contains(&name) && self.reported.insert(name) {
+            self.errors.push(Error::new_spanned(
+                ident,
+                "static class fields cannot reference class generic parameters",
+            ));
+        }
+    }
+
+    fn check_lifetime(&mut self, lifetime: &Lifetime) {
+        let name = lifetime.ident.to_string();
+        if self.lifetime_generics.contains(&name) && self.reported.insert(name) {
+            self.errors.push(Error::new_spanned(
+                lifetime,
+                "static class fields cannot reference class generic parameters",
+            ));
+        }
+    }
+}
+
+impl VisitMut for StaticFieldGenericChecker {
+    fn visit_type_path_mut(&mut self, node: &mut TypePath) {
+        if node.qself.is_none() {
+            if let Some(segment) = node.path.segments.first() {
+                self.check_value_ident(&segment.ident);
+            }
+        }
+
+        visit_mut::visit_type_path_mut(self, node);
+    }
+
+    fn visit_expr_path_mut(&mut self, node: &mut ExprPath) {
+        if node.qself.is_none() {
+            if let Some(segment) = node.path.segments.first() {
+                self.check_value_ident(&segment.ident);
+            }
+        }
+
+        visit_mut::visit_expr_path_mut(self, node);
+    }
+
+    fn visit_lifetime_mut(&mut self, node: &mut Lifetime) {
+        self.check_lifetime(node);
+
+        visit_mut::visit_lifetime_mut(self, node);
+    }
+}
+
 fn validate_unsupported_associated_type(
     associated_type: &AssociatedTypeDef,
     errors: &mut Vec<Error>,
@@ -304,6 +447,12 @@ fn validate_constructors(
                 {
                     errors.push(Error::new_spanned(
                         &associated_const.item.ident,
+                        "constructor generates method `new`, but class already declares associated item `new`",
+                    ));
+                }
+                ClassItem::StaticField(static_field) if static_field.ident == "new" => {
+                    errors.push(Error::new_spanned(
+                        &static_field.ident,
                         "constructor generates method `new`, but class already declares associated item `new`",
                     ));
                 }

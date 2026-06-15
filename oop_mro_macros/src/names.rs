@@ -28,6 +28,14 @@ pub(crate) fn default_base_trait_ident(name: &str) -> Ident {
     format_ident!("__oop_DefaultBase_{}", name)
 }
 
+pub(crate) fn static_field_ident(class_name: &str, field_name: &str) -> Ident {
+    format_ident!(
+        "__oop_static_{}_{}",
+        to_snake(class_name),
+        to_snake(field_name)
+    )
+}
+
 pub(crate) fn vtable_ident(name: &str) -> Ident {
     format_ident!("__oop_VTable_{}", name)
 }

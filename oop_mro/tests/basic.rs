@@ -1,5 +1,6 @@
 use oop_mro::prelude::*;
 use std::future::Future;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll, Waker};
 
 oop_class! {
@@ -259,6 +260,7 @@ oop_class! {
     class StaticUtility {
         const DEFAULT: usize = 41;
         pub const PUBLIC: usize = 42;
+        static NEXT_ID: AtomicUsize = AtomicUsize::new(1);
 
         fn default_value() -> usize {
             Self::DEFAULT
@@ -270,6 +272,10 @@ oop_class! {
 
         fn pair<T>(left: T, right: T) -> (T, T) {
             (left, right)
+        }
+
+        fn allocate_id() -> usize {
+            Self::NEXT_ID.fetch_add(1, Ordering::Relaxed)
         }
     }
 }
@@ -552,4 +558,8 @@ fn supports_static_methods_and_associated_constants() {
     assert_eq!(StaticUtility::default_value(), 41);
     assert_eq!(StaticUtility::public_value(), 42);
     assert_eq!(StaticUtility::pair("left", "right"), ("left", "right"));
+    assert_eq!(StaticUtility::NEXT_ID.load(Ordering::Relaxed), 1);
+    assert_eq!(StaticUtility::allocate_id(), 1);
+    assert_eq!(StaticUtility::allocate_id(), 2);
+    assert_eq!(StaticUtility::NEXT_ID.load(Ordering::Relaxed), 3);
 }

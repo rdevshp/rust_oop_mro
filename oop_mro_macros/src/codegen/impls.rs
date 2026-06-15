@@ -14,6 +14,9 @@ pub(super) fn generate_impls(graph: &Graph, index: usize, class: &ClassDef) -> T
         ClassItem::AssociatedConst(associated_const) => {
             Some(generate_associated_const(associated_const))
         }
+        ClassItem::StaticField(static_field) => {
+            Some(generate_static_field_accessor(graph, index, static_field))
+        }
         ClassItem::Method(method) if !method.is_virtual => generate_direct_method(method),
         ClassItem::Field(_) => None,
         ClassItem::Method(_) => None,
@@ -26,6 +29,7 @@ pub(super) fn generate_impls(graph: &Graph, index: usize, class: &ClassDef) -> T
         ClassItem::Method(_) => None,
         ClassItem::Constructor(_) => None,
         ClassItem::AssociatedConst(_) => None,
+        ClassItem::StaticField(_) => None,
         ClassItem::UnsupportedAssociatedType(_) => None,
     });
     let virtual_wrappers = interface_methods(graph, index)
@@ -48,6 +52,23 @@ pub(super) fn generate_impls(graph: &Graph, index: usize, class: &ClassDef) -> T
         }
 
         #default_impl
+    }
+}
+
+fn generate_static_field_accessor(
+    graph: &Graph,
+    class_index: usize,
+    static_field: &StaticFieldDef,
+) -> TokenStream2 {
+    let attrs = &static_field.attrs;
+    let vis = public_if_inherited(&static_field.vis);
+    let ident = &static_field.ident;
+    let hidden = static_field_ident(&graph.names[class_index], &static_field.ident.to_string());
+    let ty = &static_field.ty;
+
+    quote! {
+        #(#attrs)*
+        #vis const #ident: &'static #ty = &#hidden;
     }
 }
 

@@ -1,0 +1,5 @@
+error: mutable static class fields are not supported; use a type with interior mutability such as Atomic*, Mutex, RwLock, or OnceLock
+ --> tests/trybuild/fail_static_mut_class_field.rs:5:16
+  |
+5 |         static mut VALUE: usize = 0;
+  |                ^^^

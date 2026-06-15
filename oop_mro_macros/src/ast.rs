@@ -111,6 +111,7 @@ pub(crate) enum ClassItem {
     Method(MethodDef),
     Constructor(ConstructorDef),
     AssociatedConst(AssociatedConstDef),
+    StaticField(StaticFieldDef),
     UnsupportedAssociatedType(AssociatedTypeDef),
 }
 
@@ -132,6 +133,10 @@ impl Parse for ClassItem {
 
         if fork.peek(Token![type]) {
             return input.parse().map(Self::UnsupportedAssociatedType);
+        }
+
+        if fork.peek(Token![static]) {
+            return input.parse().map(Self::StaticField);
         }
 
         if fork.peek(Token![const]) {
@@ -200,6 +205,54 @@ impl Parse for AssociatedConstDef {
 impl ToTokens for AssociatedConstDef {
     fn to_tokens(&self, tokens: &mut TokenStream2) {
         self.item.to_tokens(tokens);
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct StaticFieldDef {
+    pub(crate) attrs: Vec<Attribute>,
+    pub(crate) is_override: bool,
+    pub(crate) vis: Visibility,
+    pub(crate) static_token: Token![static],
+    pub(crate) mutability: Option<Token![mut]>,
+    pub(crate) ident: Ident,
+    pub(crate) colon_token: Token![:],
+    pub(crate) ty: Type,
+    pub(crate) eq_token: Token![=],
+    pub(crate) expr: Expr,
+    pub(crate) semi_token: Token![;],
+}
+
+impl Parse for StaticFieldDef {
+    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+        let parsed_attrs = parse_oop_attrs(input)?;
+        let vis: Visibility = input.parse()?;
+        let static_token = input.parse::<Token![static]>()?;
+        let mutability = if input.peek(Token![mut]) {
+            Some(input.parse::<Token![mut]>()?)
+        } else {
+            None
+        };
+        let ident: Ident = input.parse()?;
+        let colon_token = input.parse::<Token![:]>()?;
+        let ty: Type = input.parse()?;
+        let eq_token = input.parse::<Token![=]>()?;
+        let expr: Expr = input.parse()?;
+        let semi_token = input.parse::<Token![;]>()?;
+
+        Ok(Self {
+            attrs: parsed_attrs.attrs,
+            is_override: parsed_attrs.is_override,
+            vis,
+            static_token,
+            mutability,
+            ident,
+            colon_token,
+            ty,
+            eq_token,
+            expr,
+            semi_token,
+        })
     }
 }
 

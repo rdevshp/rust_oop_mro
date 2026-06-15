@@ -1,0 +1,5 @@
+error: static class fields cannot reference class generic parameters
+ --> tests/trybuild/fail_static_field_generic_param.rs:5:30
+  |
+5 |         static EMPTY: Option<T> = None;
+  |                              ^

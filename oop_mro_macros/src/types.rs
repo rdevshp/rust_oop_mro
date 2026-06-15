@@ -179,6 +179,7 @@ pub(crate) fn class_constructors(class: &ClassDef) -> impl Iterator<Item = &Cons
         crate::ast::ClassItem::Field(_)
         | crate::ast::ClassItem::Method(_)
         | crate::ast::ClassItem::AssociatedConst(_)
+        | crate::ast::ClassItem::StaticField(_)
         | crate::ast::ClassItem::UnsupportedAssociatedType(_) => None,
     })
 }

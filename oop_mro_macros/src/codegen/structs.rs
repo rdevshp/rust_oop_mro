@@ -33,6 +33,7 @@ pub(super) fn generate_struct(graph: &Graph, index: usize, class: &ClassDef) -> 
         ClassItem::Method(_) => None,
         ClassItem::Constructor(_) => None,
         ClassItem::AssociatedConst(_) => None,
+        ClassItem::StaticField(_) => None,
         ClassItem::UnsupportedAssociatedType(_) => None,
     });
 

@@ -61,6 +61,7 @@ pub(crate) fn rewrite_all_super_calls(graph: &mut Graph, errors: &mut Vec<Error>
                 }
                 ClassItem::Field(_)
                 | ClassItem::AssociatedConst(_)
+                | ClassItem::StaticField(_)
                 | ClassItem::UnsupportedAssociatedType(_) => {}
             }
         }
