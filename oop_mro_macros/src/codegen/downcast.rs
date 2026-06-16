@@ -92,8 +92,8 @@ fn generate_box_downcast_impl(
     let mut generics = class.generics.clone();
     add_static_type_param_bounds(&mut generics);
     let (impl_generics, _, where_clause) = generics.split_for_impl();
-    let source_trait = base_cast_trait_for_actual_class(graph, source, &source_ty);
-    let target_trait = base_cast_trait_for_actual_class(graph, target, &target_ty);
+    let source_trait = base_cast_trait_for_actual_class(graph, source, source_ty);
+    let target_trait = base_cast_trait_for_actual_class(graph, target, target_ty);
     let mut wrapper_items = Vec::new();
     let arms = candidates
         .iter()

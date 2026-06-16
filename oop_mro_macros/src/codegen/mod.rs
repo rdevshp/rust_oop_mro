@@ -91,6 +91,7 @@ fn generate_compile_warnings(graph: &Graph) -> TokenStream2 {
         .map(|message| {
             let message = syn::LitStr::new(&message, Span::call_site());
             quote! {
+                #[cfg_attr(clippy, allow(deprecated))]
                 const _: () = {
                     #[deprecated(note = #message)]
                     const __OOP_MRO_WARNING: () = ();

@@ -94,7 +94,7 @@ fn generate_base_cast_impl(
     let (impl_generics, _, where_clause) = class.generics.split_for_impl();
     let class_ty = class_type_tokens(class);
     let base_ty = &view.actual;
-    let trait_path = base_cast_trait_for_actual_class(graph, base_index, &base_ty);
+    let trait_path = base_cast_trait_for_actual_class(graph, base_index, base_ty);
     let shared_name = base_cast_method_ident(&graph.names[base_index], false);
     let mutable_name = base_cast_method_ident(&graph.names[base_index], true);
     let has_virtual_edge = path_has_virtual_edge_for_path(graph, class_index, &view.path);

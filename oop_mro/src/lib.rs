@@ -167,11 +167,17 @@ impl<T> VirtualBaseSlot<T> {
         self.__oop_initialized = true;
     }
 
+    /// # Safety
+    ///
+    /// The slot must have been initialized with `init` and not subsequently moved out.
     pub unsafe fn assume_init_ref(&self) -> &T {
         debug_assert!(self.__oop_initialized);
         unsafe { self.__oop_value.assume_init_ref() }
     }
 
+    /// # Safety
+    ///
+    /// The slot must have been initialized with `init` and not subsequently moved out.
     pub unsafe fn assume_init_mut(&mut self) -> &mut T {
         debug_assert!(self.__oop_initialized);
         unsafe { self.__oop_value.assume_init_mut() }

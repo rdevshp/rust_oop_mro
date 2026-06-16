@@ -639,6 +639,7 @@ fn matching_virtual_base_target_count(
     matches.len()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn collect_matching_virtual_base_targets(
     classes: &[ClassDef],
     base_edges: &[Vec<BaseEdge>],
