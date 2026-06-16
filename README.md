@@ -1,4 +1,6 @@
-This is an experimental project doing C3 MRO OOP in Rust that is co-developed with Codex.
+This is an experimental project doing multiple inheritance OOP using C3 MRO in Rust that is co-developed with Codex.
+
+This project supports virtual/non-virtual inheritance (mixed virtual and non-virtual inheritance is also supported), abstract methods/classes, virtual/non-virtual methods, static/const class items, class functions, unsafe/async/const functions (const functions cannot be virtual), path-dependent and non path-dependent up/down casts, and mandatory `#[override]` attributes when a method overrides a superclass method.
 
 ```rust
 use oop_mro::prelude::*;
