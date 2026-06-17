@@ -15,15 +15,6 @@ pub(crate) fn base_cast_trait_ident(name: &str) -> Ident {
     format_ident!("As{}", name)
 }
 
-pub(crate) fn base_cast_method_ident(name: &str, mutable: bool) -> Ident {
-    let name = to_snake(name);
-    if mutable {
-        format_ident!("as_{}_mut", name)
-    } else {
-        format_ident!("as_{}", name)
-    }
-}
-
 pub(crate) fn private_module_ident(graph: &Graph) -> Ident {
     format_ident!("__oop_private_{}", graph.names[0])
 }

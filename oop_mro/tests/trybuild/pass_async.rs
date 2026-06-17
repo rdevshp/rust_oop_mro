@@ -32,11 +32,11 @@ oop_class! {
 
 fn main() {
     let service = ApiService::default();
-    let _direct = service.as_service().direct("abc");
+    let _direct = service.as_base::<Service>().direct("abc");
     let _virtual_direct = service.fetch("abc");
-    let _virtual_base = service.as_service().fetch("abc");
+    let _virtual_base = service.as_base::<Service>().fetch("abc");
 
     let unsafe_service = AsyncUnsafeChild::default();
     let _unsafe_direct = unsafe { unsafe_service.secret() };
-    let _unsafe_base = unsafe { unsafe_service.as_async_unsafe_base().secret() };
+    let _unsafe_base = unsafe { unsafe_service.as_base::<AsyncUnsafeBase>().secret() };
 }

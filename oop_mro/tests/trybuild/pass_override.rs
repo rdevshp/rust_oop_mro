@@ -30,7 +30,7 @@ oop_class! {
 
 fn main() {
     let icon = Icon::default();
-    let drawable = icon.as_drawable();
+    let drawable = icon.as_base::<Drawable>();
 
     assert_eq!(drawable.draw(), "icon");
     assert_eq!(drawable.label(), "icon drawable");

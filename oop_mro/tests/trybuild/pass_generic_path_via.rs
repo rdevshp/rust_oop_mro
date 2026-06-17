@@ -52,7 +52,7 @@ fn main() {
 
     let root: Box<dyn AsRoot> =
         Box::new(Nested::<u8>::new()).into_base_via::<(Branch<u8>, Right), dyn AsRoot>();
-    assert_eq!(root.as_root().label(), "right");
+    assert_eq!(root.as_base::<Root>().label(), "right");
 
     let root = match root.downcast::<dyn AsLeft>() {
         Ok(_) => panic!("right path should not downcast to left"),
@@ -69,7 +69,7 @@ fn main() {
 
     assert_eq!(
         nested
-            .as_nested()
+            .as_base::<Nested<u8>>()
             .as_base_via::<(Branch<u8>, Right), Root>()
             .label(),
         "right"

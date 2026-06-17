@@ -46,7 +46,7 @@ oop_class! {
 
 fn main() {
     let repository = MemoryRepository::new(String::from("stored"));
-    let base: &Repository<String> = repository.as_repository();
+    let base: &Repository<String> = repository.as_base::<Repository<String>>();
     let owned: Vec<Box<dyn AsRepository<String>>> =
         vec![Box::new(MemoryRepository::new(String::from("boxed")))];
     let upcast: Box<dyn AsRepository<String>> =
@@ -57,8 +57,8 @@ fn main() {
     assert_eq!(repository.current(), "stored");
     assert_eq!(base.current(), "stored");
     assert_eq!(base.map(7), Some(7));
-    assert_eq!(owned[0].as_repository().current(), "boxed");
-    assert_eq!(upcast.as_repository().current(), "upcast");
+    assert_eq!(owned[0].as_base::<Repository<String>>().current(), "boxed");
+    assert_eq!(upcast.as_base::<Repository<String>>().current(), "upcast");
     assert_eq!(array.len(), 4);
-    assert_eq!(const_leaf.as_const_base().len(), 5);
+    assert_eq!(const_leaf.as_base::<ConstBase<4>>().len(), 5);
 }

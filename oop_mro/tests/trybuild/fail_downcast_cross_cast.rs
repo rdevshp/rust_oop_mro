@@ -20,7 +20,7 @@ oop_class! {
 
 fn main() {
     let kangaroo = Kangaroo::default();
-    let _ = kangaroo.as_walker().downcast_ref::<Mammal>();
+    let _ = kangaroo.as_base::<Walker>().downcast_ref::<Mammal>();
 
     let walker: Box<dyn AsWalker> = Box::new(Kangaroo::default());
     let _ = walker.downcast::<dyn AsMammal>();

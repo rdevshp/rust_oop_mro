@@ -1,8 +1,8 @@
 error[E0277]: the trait bound `Walker: OopDowncastRefTarget<Mammal>` is not satisfied
-  --> tests/trybuild/fail_downcast_cross_cast.rs:23:34
+  --> tests/trybuild/fail_downcast_cross_cast.rs:23:42
    |
-23 |     let _ = kangaroo.as_walker().downcast_ref::<Mammal>();
-   |                                  ^^^^^^^^^^^^ unsatisfied trait bound
+23 |     let _ = kangaroo.as_base::<Walker>().downcast_ref::<Mammal>();
+   |                                          ^^^^^^^^^^^^ unsatisfied trait bound
    |
 help: the trait `OopDowncastRefTarget<Mammal>` is not implemented for `Walker`
   --> tests/trybuild/fail_downcast_cross_cast.rs:3:1

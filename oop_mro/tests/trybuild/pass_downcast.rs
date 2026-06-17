@@ -79,36 +79,36 @@ fn main() {
         Ok(mammal) => mammal,
         Err(_) => panic!("Dog should downcast to Mammal"),
     };
-    assert_eq!(mammal.as_mammal().speak(), "woof");
+    assert_eq!(mammal.as_base::<Mammal>().speak(), "woof");
 
     let dog = match mammal.downcast::<dyn AsDog>() {
         Ok(dog) => dog,
         Err(_) => panic!("Dog should downcast to Dog"),
     };
-    assert_eq!(dog.as_dog().speak(), "woof");
+    assert_eq!(dog.as_base::<Dog>().speak(), "woof");
 
     let animal: Box<dyn AsAnimal> = Box::new(Cat::default());
     let animal = match animal.downcast::<dyn AsDog>() {
         Ok(_) => panic!("Cat should not downcast to Dog"),
         Err(animal) => animal,
     };
-    assert_eq!(animal.as_animal().speak(), "meow");
+    assert_eq!(animal.as_base::<Animal>().speak(), "meow");
 
     let walker: Box<dyn AsWalker> = Box::new(Kangaroo::default());
     let kangaroo = match walker.downcast::<dyn AsKangaroo>() {
         Ok(kangaroo) => kangaroo,
         Err(_) => panic!("Kangaroo should downcast from Walker"),
     };
-    assert_eq!(kangaroo.as_kangaroo().speak(), "chuff");
+    assert_eq!(kangaroo.as_base::<Kangaroo>().speak(), "chuff");
 
     let kangaroo = Kangaroo::default();
-    assert_eq!(kangaroo.as_animal().downcast_ref::<Mammal>().unwrap().speak(), "chuff");
-    assert_eq!(kangaroo.as_walker().downcast_ref::<Kangaroo>().unwrap().speak(), "chuff");
+    assert_eq!(kangaroo.as_base::<Animal>().downcast_ref::<Mammal>().unwrap().speak(), "chuff");
+    assert_eq!(kangaroo.as_base::<Walker>().downcast_ref::<Kangaroo>().unwrap().speak(), "chuff");
 
     let mut counter = LoudCounter::default();
     assert_eq!(
         counter
-            .as_counter_mut()
+            .as_base_mut::<Counter>()
             .downcast_mut::<LoudCounter>()
             .unwrap()
             .inc(),
@@ -120,5 +120,5 @@ fn main() {
         Ok(leaf) => leaf,
         Err(_) => panic!("Slot should downcast to Leaf"),
     };
-    assert_eq!(leaf.as_leaf().get(), "value");
+    assert_eq!(leaf.as_base::<Leaf<String>>().get(), "value");
 }

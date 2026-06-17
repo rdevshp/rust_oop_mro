@@ -297,8 +297,6 @@ fn generate_owned_downcast_wrapper(
             full_path.extend(trait_view.path);
             let trait_actual = ancestor_type_for_path(graph, complete_index, &full_path);
             let trait_path = base_cast_trait_for_actual_class(graph, trait_index, &trait_actual);
-            let shared_name = base_cast_method_ident(&graph.names[trait_index], false);
-            let mutable_name = base_cast_method_ident(&graph.names[trait_index], true);
             let shared_body = static_ref_expr_for_path(
                 graph,
                 complete_index,
@@ -314,14 +312,26 @@ fn generate_owned_downcast_wrapper(
                 true,
             );
             let source_id = subobject_id(graph, complete_index, &full_path);
+            let oop_shared_body = shared_body.clone();
+            let oop_mutable_body = mutable_body.clone();
 
             quote! {
+                impl #impl_generics ::oop_mro::OopBase<#trait_actual> for #wrapper_ty #where_clause {
+                    fn __oop_as_base(&self) -> &#trait_actual {
+                        #oop_shared_body
+                    }
+
+                    fn __oop_as_base_mut(&mut self) -> &mut #trait_actual {
+                        #oop_mutable_body
+                    }
+                }
+
                 impl #impl_generics #trait_path for #wrapper_ty #where_clause {
-                    fn #shared_name(&self) -> &#trait_actual {
+                    fn __oop_as_self(&self) -> &#trait_actual {
                         #shared_body
                     }
 
-                    fn #mutable_name(&mut self) -> &mut #trait_actual {
+                    fn __oop_as_self_mut(&mut self) -> &mut #trait_actual {
                         #mutable_body
                     }
 

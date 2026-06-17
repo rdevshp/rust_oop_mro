@@ -165,7 +165,7 @@ oop_class! {
 
         #[override]
         virtual fn record(&mut self, label: String) {
-            self.as_constructed_animal_mut()
+            self.as_base_mut::<ConstructedAnimal>()
                 .events
                 .push(format!("dog:{label}"));
         }
@@ -348,7 +348,7 @@ oop_class! {
 
         #[override]
         virtual fn virtual_value(&self) -> usize {
-            self.as_virtual_object().raw_value() + 1000
+            self.as_base::<VirtualObject>().raw_value() + 1000
         }
     }
 
@@ -381,7 +381,7 @@ oop_class! {
 
         #[override]
         virtual fn dispatched(&self) -> usize {
-            self.as_direct_indirect_virtual_root().value() + 100
+            self.as_base::<DirectIndirectVirtualRoot>().value() + 100
         }
     }
 
@@ -630,22 +630,22 @@ fn casts_to_base_classes_for_non_virtual_methods() {
     let mut dog = Dog::default();
     let mut plain_child = PlainChild::default();
 
-    assert_eq!(dog.as_animal().kingdom(), "animalia");
-    assert_eq!(dog.as_animal().speak(), "woof -> generic");
-    assert_eq!(dog.as_walker().walk(), "walking");
+    assert_eq!(dog.as_base::<Animal>().kingdom(), "animalia");
+    assert_eq!(dog.as_base::<Animal>().speak(), "woof -> generic");
+    assert_eq!(dog.as_base::<Walker>().walk(), "walking");
 
-    plain_child.as_plain_base_mut().set_value(7);
-    assert_eq!(plain_child.as_plain_base().local(), "local");
-    assert_eq!(plain_child.as_plain_base().value(), 7);
+    plain_child.as_base_mut::<PlainBase>().set_value(7);
+    assert_eq!(plain_child.as_base::<PlainBase>().local(), "local");
+    assert_eq!(plain_child.as_base::<PlainBase>().value(), 7);
 
-    assert_eq!(dog.as_animal_mut().kingdom(), "animalia");
+    assert_eq!(dog.as_base_mut::<Animal>().kingdom(), "animalia");
 }
 
 #[test]
 fn supports_heterogeneous_base_collections_for_virtual_methods() {
     let dog = Dog::default();
     let cat = Cat::default();
-    let animals: Vec<&Animal> = vec![dog.as_animal(), cat.as_animal()];
+    let animals: Vec<&Animal> = vec![dog.as_base::<Animal>(), cat.as_base::<Animal>()];
     let sounds: Vec<_> = animals.iter().map(|animal| animal.speak()).collect();
 
     assert_eq!(sounds, ["woof -> generic", "meow"]);
@@ -654,12 +654,12 @@ fn supports_heterogeneous_base_collections_for_virtual_methods() {
 #[test]
 fn base_references_dispatch_inherited_and_mutable_virtual_methods() {
     let dog = Dog::default();
-    let walkers: Vec<&Walker> = vec![dog.as_walker()];
+    let walkers: Vec<&Walker> = vec![dog.as_base::<Walker>()];
     assert_eq!(walkers[0].walk(), "walking");
 
     let mut counter = Counter::default();
     let mut loud_counter = LoudCounter::default();
-    let mut counters: Vec<&mut Counter> = vec![&mut counter, loud_counter.as_counter_mut()];
+    let mut counters: Vec<&mut Counter> = vec![&mut counter, loud_counter.as_base_mut::<Counter>()];
     let counts: Vec<_> = counters
         .iter_mut()
         .map(|counter| (*counter).inc())
@@ -671,10 +671,10 @@ fn base_references_dispatch_inherited_and_mutable_virtual_methods() {
 #[test]
 fn owned_base_trait_objects_can_target_inherited_interfaces() {
     let animal: Box<dyn AsAnimal> = Box::new(Dog::default());
-    assert_eq!(animal.as_animal().speak(), "woof -> generic");
+    assert_eq!(animal.as_base::<Animal>().speak(), "woof -> generic");
 
     let walker: Box<dyn AsWalker> = Box::new(Dog::default());
-    assert_eq!(walker.as_walker().walk(), "walking");
+    assert_eq!(walker.as_base::<Walker>().walk(), "walking");
 }
 
 #[test]
@@ -684,20 +684,20 @@ fn owned_base_trait_objects_downcast_through_inheritance() {
         Ok(mammal) => mammal,
         Err(_) => panic!("kangaroo should downcast from Animal to Mammal"),
     };
-    assert_eq!(mammal.as_mammal().speak(), "chuff");
+    assert_eq!(mammal.as_base::<Mammal>().speak(), "chuff");
 
     let kangaroo = match mammal.downcast::<dyn AsKangaroo>() {
         Ok(kangaroo) => kangaroo,
         Err(_) => panic!("kangaroo should downcast from Mammal to Kangaroo"),
     };
-    assert_eq!(kangaroo.as_kangaroo().walk(), "walking");
+    assert_eq!(kangaroo.as_base::<Kangaroo>().walk(), "walking");
 
     let walker: Box<dyn AsWalker> = Box::new(Kangaroo::default());
     let kangaroo = match walker.downcast::<dyn AsKangaroo>() {
         Ok(kangaroo) => kangaroo,
         Err(_) => panic!("kangaroo should downcast from Walker to Kangaroo"),
     };
-    assert_eq!(kangaroo.as_kangaroo().speak(), "chuff");
+    assert_eq!(kangaroo.as_base::<Kangaroo>().speak(), "chuff");
 }
 
 #[test]
@@ -708,13 +708,13 @@ fn failed_owned_downcast_preserves_original_box() {
         Err(animal) => animal,
     };
 
-    assert_eq!(animal.as_animal().speak(), "meow");
+    assert_eq!(animal.as_base::<Animal>().speak(), "meow");
 }
 
 #[test]
 fn borrowed_base_references_downcast_through_vtable_metadata() {
     let kangaroo = Kangaroo::default();
-    let animal = kangaroo.as_animal();
+    let animal = kangaroo.as_base::<Animal>();
     let mammal = animal
         .downcast_ref::<Mammal>()
         .expect("kangaroo Animal view should downcast to Mammal");
@@ -725,20 +725,20 @@ fn borrowed_base_references_downcast_through_vtable_metadata() {
     assert_eq!(mammal.speak(), "chuff");
     assert_eq!(kangaroo_ref.walk(), "walking");
 
-    let walker = kangaroo.as_walker();
+    let walker = kangaroo.as_base::<Walker>();
     let kangaroo_ref = walker
         .downcast_ref::<Kangaroo>()
         .expect("kangaroo Walker view should downcast to Kangaroo");
     assert_eq!(kangaroo_ref.speak(), "chuff");
 
     let cat = Cat::default();
-    assert!(cat.as_animal().downcast_ref::<Mammal>().is_none());
+    assert!(cat.as_base::<Animal>().downcast_ref::<Mammal>().is_none());
 }
 
 #[test]
 fn mutable_base_references_downcast_through_vtable_metadata() {
     let mut counter = LoudCounter::default();
-    let base = counter.as_counter_mut();
+    let base = counter.as_base_mut::<Counter>();
     let loud = base
         .downcast_mut::<LoudCounter>()
         .expect("loud counter should downcast from Counter");
@@ -756,7 +756,7 @@ fn borrowed_downcast_follows_the_receiver_inheritance_path() {
         left_root
             .downcast_ref::<DowncastPathLeft>()
             .expect("left root should downcast to left")
-            .as_downcast_path_root()
+            .as_base::<DowncastPathRoot>()
             .value(),
         31
     );
@@ -765,7 +765,7 @@ fn borrowed_downcast_follows_the_receiver_inheritance_path() {
         right_root
             .downcast_ref::<DowncastPathRight>()
             .expect("right root should downcast to right")
-            .as_downcast_path_root()
+            .as_base::<DowncastPathRoot>()
             .value(),
         47
     );
@@ -795,7 +795,9 @@ fn owned_downcast_follows_the_receiver_inheritance_path() {
         Err(_) => panic!("left root should downcast to left"),
     };
     assert_eq!(
-        left.as_downcast_path_left().as_downcast_path_root().value(),
+        left.as_base::<DowncastPathLeft>()
+            .as_base::<DowncastPathRoot>()
+            .value(),
         31
     );
 
@@ -812,7 +814,7 @@ fn owned_downcast_follows_the_receiver_inheritance_path() {
     };
     assert_eq!(
         diamond
-            .as_downcast_path_diamond()
+            .as_base::<DowncastPathDiamond>()
             .as_base_via::<DowncastPathRight, DowncastPathRoot>()
             .value(),
         47
@@ -831,7 +833,7 @@ fn exposes_c3_metadata_and_uses_c3_for_forwarding() {
         object.as_base_via::<A, Object>() as *const Object,
         object.as_base_via::<B, Object>() as *const Object,
     );
-    assert_eq!(object.as_b().as_object().name(), "A");
+    assert_eq!(object.as_base::<B>().as_base::<Object>().name(), "A");
 }
 
 #[test]
@@ -854,7 +856,7 @@ fn supports_mutable_super_calls() {
 #[allow(clippy::assertions_on_constants)]
 fn supports_abstract_superclass_methods_with_concrete_overrides() {
     let square = Square::default();
-    let shapes: Vec<&Shape> = vec![square.as_shape()];
+    let shapes: Vec<&Shape> = vec![square.as_base::<Shape>()];
 
     assert!(<Shape as OopClass>::IS_ABSTRACT);
     assert!(!<Square as OopClass>::IS_ABSTRACT);
@@ -869,7 +871,7 @@ fn supports_abstract_superclass_methods_with_concrete_overrides() {
 #[allow(clippy::assertions_on_constants)]
 fn inherited_concrete_methods_can_satisfy_abstract_requirements() {
     let icon = Icon::default();
-    let drawables: Vec<&AbstractDrawable> = vec![icon.as_abstract_drawable()];
+    let drawables: Vec<&AbstractDrawable> = vec![icon.as_base::<AbstractDrawable>()];
 
     assert!(!<Icon as OopClass>::IS_ABSTRACT);
     assert_eq!(<Icon as OopClass>::ABSTRACT_METHODS.len(), 0);
@@ -886,7 +888,7 @@ fn constructors_dispatch_virtual_methods_through_complete_object() {
     let dog = ConstructedDog::new();
 
     assert_eq!(
-        dog.as_constructed_animal().events(),
+        dog.as_base::<ConstructedAnimal>().events(),
         vec!["dog:base".to_string(), "dog:derived".to_string()]
     );
 }
@@ -896,9 +898,9 @@ fn supports_unsafe_direct_and_virtual_methods() {
     let child = UnsafeChild::default();
 
     unsafe {
-        assert_eq!(child.as_unsafe_base().direct_secret(), 3);
+        assert_eq!(child.as_base::<UnsafeBase>().direct_secret(), 3);
         assert_eq!(child.code(), 29);
-        assert_eq!(child.as_unsafe_base().code(), 29);
+        assert_eq!(child.as_base::<UnsafeBase>().code(), 29);
     }
 }
 
@@ -906,15 +908,15 @@ fn supports_unsafe_direct_and_virtual_methods() {
 fn supports_async_direct_and_virtual_methods() {
     let leaf = AsyncLeaf::default();
     let concrete = AsyncConcrete::default();
-    let roots: Vec<&AsyncRoot> = vec![leaf.as_async_root()];
+    let roots: Vec<&AsyncRoot> = vec![leaf.as_base::<AsyncRoot>()];
 
     assert_eq!(block_on(leaf.score("abc")), 13);
-    assert_eq!(block_on(leaf.as_async_root().score("abcd")), 14);
-    assert_eq!(block_on(leaf.as_async_root().direct_score("xy")), 3);
-    assert_eq!(block_on(leaf.as_async_root().direct_label()), "");
-    assert_eq!(block_on(leaf.as_async_root().label_ref()), "");
+    assert_eq!(block_on(leaf.as_base::<AsyncRoot>().score("abcd")), 14);
+    assert_eq!(block_on(leaf.as_base::<AsyncRoot>().direct_score("xy")), 3);
+    assert_eq!(block_on(leaf.as_base::<AsyncRoot>().direct_label()), "");
+    assert_eq!(block_on(leaf.as_base::<AsyncRoot>().label_ref()), "");
     assert_eq!(block_on(roots[0].score("hello")), 15);
-    assert_eq!(block_on(concrete.as_async_abstract().load()), 33);
+    assert_eq!(block_on(concrete.as_base::<AsyncAbstract>().load()), 33);
 }
 
 #[test]
@@ -929,11 +931,39 @@ fn supports_generic_classes_and_base_views() {
     };
 
     assert_eq!(leaf.get(), "leaf");
-    assert_eq!(leaf.as_generic_slot().get(), "leaf");
-    assert_eq!(leaf.as_generic_slot().passthrough(42usize), 42);
-    assert_eq!(leaf.as_generic_slot().cloned("clone".to_string()), "clone");
-    assert_eq!(slots[0].as_generic_slot().get(), "boxed");
-    assert_eq!(leaf_box.as_generic_leaf().get(), "downcast");
+    assert_eq!(leaf.as_base::<GenericSlot<String>>().get(), "leaf");
+    assert_eq!(
+        leaf.as_base::<GenericSlot<String>>().passthrough(42usize),
+        42
+    );
+    assert_eq!(
+        leaf.as_base::<GenericSlot<String>>()
+            .cloned("clone".to_string()),
+        "clone"
+    );
+    assert_eq!(slots[0].as_base::<GenericSlot<String>>().get(), "boxed");
+    assert_eq!(leaf_box.as_base::<GenericLeaf<String>>().get(), "downcast");
+}
+
+#[test]
+fn target_explicit_as_base_casts_to_unambiguous_bases() {
+    let mut dog = Dog::default();
+    assert_eq!(dog.as_base::<Animal>().kingdom(), "animalia");
+    assert_eq!(dog.as_base::<Animal>().speak(), "woof -> generic");
+    assert_eq!(dog.as_base::<Walker>().walk(), "walking");
+    assert_eq!(dog.as_base_mut::<Animal>().kingdom(), "animalia");
+
+    let animal: Box<dyn AsAnimal> = Box::new(Dog::default());
+    assert_eq!(animal.as_base::<Animal>().speak(), "woof -> generic");
+
+    let mut loud_counter = LoudCounter::default();
+    assert_eq!(loud_counter.as_base_mut::<Counter>().inc(), 11);
+
+    let leaf = GenericLeaf::new("leaf".to_string());
+    assert_eq!(leaf.as_base::<GenericSlot<String>>().get(), "leaf");
+
+    let slot: Box<dyn AsGenericSlot<String>> = Box::new(GenericLeaf::new("boxed".to_string()));
+    assert_eq!(slot.as_base::<GenericSlot<String>>().get(), "boxed");
 }
 
 #[test]
@@ -978,39 +1008,42 @@ fn virtual_diamond_shares_base_storage_and_dispatch() {
         let mut diamond = VirtualDiamond::new();
 
         assert!(core::ptr::eq(
-            diamond.as_virtual_left().as_virtual_object(),
-            diamond.as_virtual_right().as_virtual_object(),
+            diamond.as_base::<VirtualLeft>().as_base::<VirtualObject>(),
+            diamond.as_base::<VirtualRight>().as_base::<VirtualObject>(),
         ));
-        assert_eq!(diamond.as_virtual_object().raw_value(), 10);
+        assert_eq!(diamond.as_base::<VirtualObject>().raw_value(), 10);
         assert_eq!(
             diamond
-                .as_virtual_left()
-                .as_virtual_object()
+                .as_base::<VirtualLeft>()
+                .as_base::<VirtualObject>()
                 .virtual_value(),
             1010
         );
         assert!(diamond
-            .as_virtual_object()
+            .as_base::<VirtualObject>()
             .downcast_ref::<VirtualLeft>()
             .is_some());
         assert!(diamond
-            .as_virtual_object()
+            .as_base::<VirtualObject>()
             .downcast_ref::<VirtualRight>()
             .is_some());
         assert!(diamond
-            .as_virtual_object()
+            .as_base::<VirtualObject>()
             .downcast_ref::<VirtualDiamond>()
             .is_some());
 
         diamond
-            .as_virtual_right_mut()
-            .as_virtual_object_mut()
+            .as_base_mut::<VirtualRight>()
+            .as_base_mut::<VirtualObject>()
             .set_raw_value(33);
         assert_eq!(
-            diamond.as_virtual_left().as_virtual_object().raw_value(),
+            diamond
+                .as_base::<VirtualLeft>()
+                .as_base::<VirtualObject>()
+                .raw_value(),
             33
         );
-        assert_eq!(diamond.as_virtual_object().virtual_value(), 1033);
+        assert_eq!(diamond.as_base::<VirtualObject>().virtual_value(), 1033);
     }
 
     assert_eq!(VIRTUAL_OBJECT_DROPS.load(Ordering::SeqCst), 1);
@@ -1020,7 +1053,7 @@ fn virtual_diamond_shares_base_storage_and_dispatch() {
         Ok(boxed) => boxed,
         Err(_) => panic!("virtual object box should downcast to complete diamond"),
     };
-    assert_eq!(boxed.as_virtual_diamond().virtual_value(), 1010);
+    assert_eq!(boxed.as_base::<VirtualDiamond>().virtual_value(), 1010);
 }
 
 #[test]
@@ -1028,20 +1061,26 @@ fn virtual_base_can_be_reached_by_direct_and_indirect_edges() {
     let mut diamond = DirectIndirectVirtualDiamond::new();
 
     assert!(core::ptr::eq(
-        diamond.as_direct_indirect_virtual_root(),
+        diamond.as_base::<DirectIndirectVirtualRoot>(),
         diamond
-            .as_indirect_virtual_branch()
-            .as_direct_indirect_virtual_root(),
+            .as_base::<IndirectVirtualBranch>()
+            .as_base::<DirectIndirectVirtualRoot>(),
     ));
-    assert_eq!(diamond.as_direct_indirect_virtual_root().value(), 7);
-    assert_eq!(diamond.as_direct_indirect_virtual_root().dispatched(), 107);
+    assert_eq!(diamond.as_base::<DirectIndirectVirtualRoot>().value(), 7);
+    assert_eq!(
+        diamond.as_base::<DirectIndirectVirtualRoot>().dispatched(),
+        107
+    );
 
     diamond
-        .as_indirect_virtual_branch_mut()
-        .as_direct_indirect_virtual_root_mut()
+        .as_base_mut::<IndirectVirtualBranch>()
+        .as_base_mut::<DirectIndirectVirtualRoot>()
         .set_value(19);
-    assert_eq!(diamond.as_direct_indirect_virtual_root().value(), 19);
-    assert_eq!(diamond.as_direct_indirect_virtual_root().dispatched(), 119);
+    assert_eq!(diamond.as_base::<DirectIndirectVirtualRoot>().value(), 19);
+    assert_eq!(
+        diamond.as_base::<DirectIndirectVirtualRoot>().dispatched(),
+        119
+    );
 }
 
 #[test]
@@ -1050,7 +1089,7 @@ fn mixed_virtual_and_non_virtual_paths_create_distinct_base_subobjects() {
 
     assert!(core::ptr::eq(
         diamond.as_base_via::<MixedVirtualLeft, MixedRoot>(),
-        diamond.as_mixed_virtual_left().as_mixed_root(),
+        diamond.as_base::<MixedVirtualLeft>().as_base::<MixedRoot>(),
     ));
     assert_ne!(
         diamond.as_base_via::<MixedVirtualLeft, MixedRoot>() as *const MixedRoot,
@@ -1133,7 +1172,7 @@ fn via_type_selects_specific_subobject() {
     assert_eq!(diamond.as_base_via::<PathLeft, PathRoot>().value(), 11);
     assert_eq!(diamond.as_base_via::<PathRight, PathRoot>().value(), 17);
 
-    let branch_trait: &dyn AsPathBranch = diamond.as_path_branch();
+    let branch_trait: &dyn AsPathBranch = diamond.as_base::<PathBranch>();
     assert_eq!(branch_trait.as_base_via::<PathLeft, PathRoot>().value(), 11,);
 }
 
@@ -1162,12 +1201,12 @@ fn via_type_uses_actual_generic_specialization() {
 fn owned_via_upcasts_preserve_selected_subobject() {
     let concrete_root =
         Box::new(MixedDiamond::new()).into_base_via::<MixedVirtualLeft, dyn AsMixedRoot>();
-    assert_eq!(concrete_root.as_mixed_root().value(), 10);
+    assert_eq!(concrete_root.as_base::<MixedRoot>().value(), 10);
 
     let boxed: Box<dyn AsMixedDiamond> = Box::new(MixedDiamond::new());
     let root = boxed.into_base_via::<MixedConcreteRight, dyn AsMixedRoot>();
 
-    assert_eq!(root.as_mixed_root().value(), 2);
+    assert_eq!(root.as_base::<MixedRoot>().value(), 2);
 
     let diamond = match root.downcast::<dyn AsMixedDiamond>() {
         Ok(diamond) => diamond,
@@ -1175,7 +1214,7 @@ fn owned_via_upcasts_preserve_selected_subobject() {
     };
     assert_eq!(
         diamond
-            .as_mixed_diamond()
+            .as_base::<MixedDiamond>()
             .as_base_via::<MixedConcreteRight, MixedRoot>()
             .value(),
         2,
@@ -1187,7 +1226,7 @@ fn owned_via_upcasts_support_tuple_paths() {
     let boxed: Box<dyn AsPathDiamond> = Box::new(PathDiamond::new());
     let root = boxed.into_base_via::<(PathBranch, PathRight), dyn AsPathRoot>();
 
-    assert_eq!(root.as_path_root().value(), 17);
+    assert_eq!(root.as_base::<PathRoot>().value(), 17);
 }
 
 #[test]
@@ -1197,14 +1236,14 @@ fn owned_via_upcast_from_path_owned_dyn_source_preserves_source_subobject() {
         diamond.into_base_via::<OwnedViaDynTopRight, dyn AsOwnedViaDynBranch>();
     let root = branch.into_base_via::<OwnedViaDynLeft, dyn AsOwnedViaDynRoot>();
 
-    assert_eq!(root.as_owned_via_dyn_root().value(), 20);
+    assert_eq!(root.as_base::<OwnedViaDynRoot>().value(), 20);
 
     let diamond: Box<OwnedViaDynDiamond> = Box::new(OwnedViaDynDiamond::new());
     let branch: Box<dyn AsOwnedViaDynBranch> =
         diamond.into_base_via::<OwnedViaDynTopLeft, dyn AsOwnedViaDynBranch>();
     let root = branch.into_base_via::<OwnedViaDynRight, dyn AsOwnedViaDynRoot>();
 
-    assert_eq!(root.as_owned_via_dyn_root().value(), 11);
+    assert_eq!(root.as_base::<OwnedViaDynRoot>().value(), 11);
 }
 
 #[test]
@@ -1212,7 +1251,7 @@ fn owned_via_upcasts_use_actual_generic_specialization() {
     let boxed: Box<dyn AsGenericViaDiamond> = Box::new(GenericViaDiamond::new());
     let root = boxed.into_base_via::<GenericViaBase<String>, dyn AsGenericViaRoot>();
 
-    assert_eq!(root.as_generic_via_root().label(), "right");
+    assert_eq!(root.as_base::<GenericViaRoot>().label(), "right");
 }
 
 #[test]
@@ -1224,16 +1263,14 @@ fn failed_owned_via_downcast_preserves_original_box() {
         Err(root) => root,
     };
 
-    assert_eq!(root.as_mixed_root().value(), 10);
+    assert_eq!(root.as_base::<MixedRoot>().value(), 10);
 }
 
 #[test]
 fn virtual_generic_specializations_are_distinct_bases() {
     let diamond = SpecializedDiamond::new();
-    let left_slot: &SpecializedSlot<i32> =
-        <SpecializedDiamond as AsSpecializedSlot<i32>>::as_specialized_slot(&diamond);
-    let right_slot: &SpecializedSlot<String> =
-        <SpecializedDiamond as AsSpecializedSlot<String>>::as_specialized_slot(&diamond);
+    let left_slot: &SpecializedSlot<i32> = diamond.as_base::<SpecializedSlot<i32>>();
+    let right_slot: &SpecializedSlot<String> = diamond.as_base::<SpecializedSlot<String>>();
 
     assert_ne!(
         left_slot as *const SpecializedSlot<i32> as *const (),
@@ -1243,6 +1280,11 @@ fn virtual_generic_specializations_are_distinct_bases() {
     assert_eq!(right_slot.label(), "string");
     assert_eq!(left_slot.type_name(), "i32");
     assert_eq!(right_slot.type_name(), "alloc::string::String");
+    assert_eq!(diamond.as_base::<SpecializedSlot<i32>>().label(), "int");
+    assert_eq!(
+        diamond.as_base::<SpecializedSlot<String>>().label(),
+        "string"
+    );
 
     let left = left_slot
         .downcast_ref::<SpecializedLeft>()
@@ -1250,8 +1292,8 @@ fn virtual_generic_specializations_are_distinct_bases() {
     let right = right_slot
         .downcast_ref::<SpecializedRight>()
         .expect("String slot should downcast to SpecializedRight");
-    assert_eq!(left.as_specialized_slot().label(), "int");
-    assert_eq!(right.as_specialized_slot().label(), "string");
+    assert_eq!(left.as_base::<SpecializedSlot<i32>>().label(), "int");
+    assert_eq!(right.as_base::<SpecializedSlot<String>>().label(), "string");
 
     let slot: Box<dyn AsSpecializedSlot<String>> = Box::new(SpecializedDiamond::new());
     let right = match slot.downcast::<dyn AsSpecializedRight>() {
@@ -1259,7 +1301,10 @@ fn virtual_generic_specializations_are_distinct_bases() {
         Err(_) => panic!("String slot should owned-downcast to SpecializedRight"),
     };
     assert_eq!(
-        right.as_specialized_right().as_specialized_slot().label(),
+        right
+            .as_base::<SpecializedRight>()
+            .as_base::<SpecializedSlot<String>>()
+            .label(),
         "string"
     );
 }

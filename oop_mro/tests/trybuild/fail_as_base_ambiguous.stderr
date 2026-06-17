@@ -1,5 +1,5 @@
 warning: use of deprecated constant `_::__OOP_MRO_WARNING`: ambiguous base `Root` in class `Diamond`: `as_base::<Root>()` is unavailable because the target is not unique; use path-directed casts such as `as_base_via::<Left, Root>()`, `as_base_via::<Right, Root>()`
- --> tests/trybuild/fail_ambiguous_base_cast.rs:3:1
+ --> tests/trybuild/fail_as_base_ambiguous.rs:3:1
   |
 3 | / oop_class! {
 4 | |     class Root {}
@@ -13,13 +13,13 @@ warning: use of deprecated constant `_::__OOP_MRO_WARNING`: ambiguous base `Root
   = note: this warning originates in the macro `oop_class` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0277]: the trait bound `Diamond: OopBase<Root>` is not satisfied
-  --> tests/trybuild/fail_ambiguous_base_cast.rs:12:21
+  --> tests/trybuild/fail_as_base_ambiguous.rs:12:21
    |
 12 |     let _ = diamond.as_base::<Root>();
    |                     ^^^^^^^ unsatisfied trait bound
    |
 help: the trait `OopBase<Root>` is not implemented for `Diamond`
-  --> tests/trybuild/fail_ambiguous_base_cast.rs:3:1
+  --> tests/trybuild/fail_as_base_ambiguous.rs:3:1
    |
  3 | / oop_class! {
  4 | |     class Root {}
@@ -28,7 +28,7 @@ help: the trait `OopBase<Root>` is not implemented for `Diamond`
  7 | |     class Diamond: Left, Right {}
    | |_________________^
 help: the following other types implement trait `OopBase<Target>`
-  --> tests/trybuild/fail_ambiguous_base_cast.rs:3:1
+  --> tests/trybuild/fail_as_base_ambiguous.rs:3:1
    |
  3 | / oop_class! {
  4 | |     class Root {}

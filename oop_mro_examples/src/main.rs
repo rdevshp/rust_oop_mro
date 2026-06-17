@@ -69,7 +69,7 @@ oop_class! {
 fn animal_examples() {
     let dog = Dog::new(String::from("Dog1"));
     let kangaroo = Kangaroo::new(String::from("Kangaroo1"));
-    let v: Vec<&Mammal> = vec![dog.as_mammal(), kangaroo.as_mammal()];
+    let v: Vec<&Mammal> = vec![dog.as_base::<Mammal>(), kangaroo.as_base::<Mammal>()];
     for i in v {
         println!("type: {}, name: {}", i.typ(), i.name());
         i.speak();
@@ -87,7 +87,7 @@ fn animal_examples() {
     ];
 
     for object in &animals {
-        let animal: &Animal = object.as_animal();
+        let animal: &Animal = object.as_base::<Animal>();
         println!("{}", animal.name());
 
         // checked downcast
@@ -201,7 +201,7 @@ fn path_upcast_and_downcast_examples() {
 
     let root: Box<dyn AsPathExampleRoot> = Box::new(PathExampleDiamond::new())
         .into_base_via::<PathExampleRight, dyn AsPathExampleRoot>();
-    assert_eq!(root.as_path_example_root().label(), "right-root");
+    assert_eq!(root.as_base::<PathExampleRoot>().label(), "right-root");
 
     let root = match root.downcast::<dyn AsPathExampleLeft>() {
         Ok(_) => panic!("right root should not downcast to left path"),
@@ -218,7 +218,7 @@ fn path_upcast_and_downcast_examples() {
 
     assert_eq!(
         diamond
-            .as_path_example_diamond()
+            .as_base::<PathExampleDiamond>()
             .as_base_via::<PathExampleLeft, PathExampleRoot>()
             .label(),
         "left-root",
@@ -265,7 +265,7 @@ fn long_path_upcast_and_downcast_example() {
     let root: Box<dyn AsPathExampleRoot> =
         Box::new(PathExampleNested::new())
             .into_base_via::<(PathExampleBranch, PathExampleRight), dyn AsPathExampleRoot>();
-    assert_eq!(root.as_path_example_root().label(), "right-root");
+    assert_eq!(root.as_base::<PathExampleRoot>().label(), "right-root");
 
     let root = match root.downcast::<dyn AsPathExampleLeft>() {
         Ok(_) => panic!("right nested root should not downcast to left path"),
@@ -282,7 +282,7 @@ fn long_path_upcast_and_downcast_example() {
 
     assert_eq!(
         nested
-            .as_path_example_nested()
+            .as_base::<PathExampleNested>()
             .as_base_via::<(PathExampleBranch, PathExampleRight), PathExampleRoot>()
             .label(),
         "right-root",
@@ -320,7 +320,7 @@ fn concrete_generic_owned_long_path_upcast_and_downcast_example() {
     let root: Box<dyn AsPathExampleRoot> = Box::new(PathExampleGenericNested::<u8>::new())
         .into_base_via::<(PathExampleGenericBranch<u8>, PathExampleRight), dyn AsPathExampleRoot>(
     );
-    assert_eq!(root.as_path_example_root().label(), "right-root");
+    assert_eq!(root.as_base::<PathExampleRoot>().label(), "right-root");
 
     let root = match root.downcast::<dyn AsPathExampleLeft>() {
         Ok(_) => panic!("generic right nested root should not downcast to left path"),
@@ -337,7 +337,7 @@ fn concrete_generic_owned_long_path_upcast_and_downcast_example() {
 
     assert_eq!(
         generic_nested
-            .as_path_example_generic_nested()
+            .as_base::<PathExampleGenericNested<u8>>()
             .as_base_via::<(PathExampleGenericBranch<u8>, PathExampleRight), PathExampleRoot>()
             .label(),
         "right-root",
@@ -378,7 +378,7 @@ oop_class! {
 
         #[override]
         virtual fn dispatched_value(&self) -> usize {
-            self.as_virtual_example_root().value() + 100
+            self.as_base::<VirtualExampleRoot>().value() + 100
         }
     }
 }
@@ -387,52 +387,64 @@ fn virtual_inheritance_examples() {
     let mut diamond = VirtualExampleDiamond::new();
 
     assert!(core::ptr::eq(
-        diamond.as_virtual_example_left().as_virtual_example_root(),
-        diamond.as_virtual_example_right().as_virtual_example_root(),
+        diamond
+            .as_base::<VirtualExampleLeft>()
+            .as_base::<VirtualExampleRoot>(),
+        diamond
+            .as_base::<VirtualExampleRight>()
+            .as_base::<VirtualExampleRoot>(),
     ));
     assert!(core::ptr::eq(
-        diamond.as_virtual_example_root(),
-        diamond.as_virtual_example_left().as_virtual_example_root(),
+        diamond.as_base::<VirtualExampleRoot>(),
+        diamond
+            .as_base::<VirtualExampleLeft>()
+            .as_base::<VirtualExampleRoot>(),
     ));
-    assert_eq!(diamond.as_virtual_example_root().value(), 10);
-    assert_eq!(diamond.as_virtual_example_root().dispatched_value(), 110);
+    assert_eq!(diamond.as_base::<VirtualExampleRoot>().value(), 10);
+    assert_eq!(
+        diamond.as_base::<VirtualExampleRoot>().dispatched_value(),
+        110
+    );
 
     diamond
-        .as_virtual_example_right_mut()
-        .as_virtual_example_root_mut()
+        .as_base_mut::<VirtualExampleRight>()
+        .as_base_mut::<VirtualExampleRoot>()
         .set_value(33);
     assert_eq!(
         diamond
-            .as_virtual_example_left()
-            .as_virtual_example_root()
+            .as_base::<VirtualExampleLeft>()
+            .as_base::<VirtualExampleRoot>()
             .value(),
         33
     );
-    assert_eq!(diamond.as_virtual_example_root().dispatched_value(), 133);
+    assert_eq!(
+        diamond.as_base::<VirtualExampleRoot>().dispatched_value(),
+        133
+    );
 
-    let root = diamond.as_virtual_example_root();
+    let root = diamond.as_base::<VirtualExampleRoot>();
     assert!(root.downcast_ref::<VirtualExampleLeft>().is_some());
     assert!(root.downcast_ref::<VirtualExampleRight>().is_some());
     assert!(root.downcast_ref::<VirtualExampleDiamond>().is_some());
 
     diamond
-        .as_virtual_example_root_mut()
+        .as_base_mut::<VirtualExampleRoot>()
         .downcast_mut::<VirtualExampleDiamond>()
         .expect("virtual root should downcast mutably to complete diamond")
-        .as_virtual_example_root_mut()
+        .as_base_mut::<VirtualExampleRoot>()
         .set_value(41);
-    assert_eq!(diamond.as_virtual_example_root().value(), 41);
+    assert_eq!(diamond.as_base::<VirtualExampleRoot>().value(), 41);
 
     let root: Box<dyn AsVirtualExampleRoot> = Box::new(VirtualExampleDiamond::new());
-    assert_eq!(root.as_virtual_example_root().dispatched_value(), 110);
+    assert_eq!(root.as_base::<VirtualExampleRoot>().dispatched_value(), 110);
 
     let left = match root.downcast::<dyn AsVirtualExampleLeft>() {
         Ok(left) => left,
         Err(_) => panic!("virtual root should downcast to left branch"),
     };
     assert_eq!(
-        left.as_virtual_example_left()
-            .as_virtual_example_root()
+        left.as_base::<VirtualExampleLeft>()
+            .as_base::<VirtualExampleRoot>()
             .value(),
         10
     );
@@ -443,8 +455,8 @@ fn virtual_inheritance_examples() {
     };
     assert_eq!(
         diamond
-            .as_virtual_example_diamond()
-            .as_virtual_example_root()
+            .as_base::<VirtualExampleDiamond>()
+            .as_base::<VirtualExampleRoot>()
             .dispatched_value(),
         110
     );
@@ -526,7 +538,7 @@ fn direct_virtual_base_path_cast_examples() {
     let root: Box<dyn AsDirectVirtualExampleRoot> = Box::new(DirectVirtualExampleMixed::new())
         .into_base_via::<DirectVirtualExampleRoot, dyn AsDirectVirtualExampleRoot>(
     );
-    assert_eq!(root.as_direct_virtual_example_root().value(), 5);
+    assert_eq!(root.as_base::<DirectVirtualExampleRoot>().value(), 5);
 
     let root = match root.downcast::<dyn AsDirectVirtualExampleBranch>() {
         Ok(_) => panic!("direct virtual root should not downcast to branch path"),
@@ -538,7 +550,7 @@ fn direct_virtual_base_path_cast_examples() {
     };
     assert_eq!(
         mixed
-            .as_direct_virtual_example_mixed()
+            .as_base::<DirectVirtualExampleMixed>()
             .as_base_via::<DirectVirtualExampleRoot, DirectVirtualExampleRoot>()
             .value(),
         5
@@ -641,7 +653,7 @@ fn mixed_inheritance_path_cast_examples() {
     let root: Box<dyn AsMixedExampleRoot> = Box::new(MixedExampleDiamond::new())
         .into_base_via::<MixedExampleConcreteBranch, dyn AsMixedExampleRoot>(
     );
-    assert_eq!(root.as_mixed_example_root().value(), 2);
+    assert_eq!(root.as_base::<MixedExampleRoot>().value(), 2);
 
     let root = match root.downcast::<dyn AsMixedExampleVirtualBranch>() {
         Ok(_) => panic!("concrete root path should not downcast to virtual branch"),
@@ -657,7 +669,7 @@ fn mixed_inheritance_path_cast_examples() {
     };
     assert_eq!(
         diamond
-            .as_mixed_example_diamond()
+            .as_base::<MixedExampleDiamond>()
             .as_base_via::<MixedExampleConcreteBranch, MixedExampleRoot>()
             .value(),
         2
@@ -666,7 +678,7 @@ fn mixed_inheritance_path_cast_examples() {
     let root: Box<dyn AsMixedExampleRoot> = Box::new(MixedExampleDiamond::new())
         .into_base_via::<MixedExampleVirtualBranch, dyn AsMixedExampleRoot>(
     );
-    assert_eq!(root.as_mixed_example_root().value(), 10);
+    assert_eq!(root.as_base::<MixedExampleRoot>().value(), 10);
 
     let root = match root.downcast::<dyn AsMixedExampleConcreteBranch>() {
         Ok(_) => panic!("virtual root path should not downcast to concrete branch"),
@@ -678,8 +690,8 @@ fn mixed_inheritance_path_cast_examples() {
     };
     assert_eq!(
         virtual_branch
-            .as_mixed_example_virtual_branch()
-            .as_mixed_example_root()
+            .as_base::<MixedExampleVirtualBranch>()
+            .as_base::<MixedExampleRoot>()
             .value(),
         10
     );
@@ -729,7 +741,7 @@ fn job_factory_downcast_example(job_factory: JobFactory) {
             println!("downcasted to job_factory");
             println!(
                 "job_factory_downcast job id: {:?}:",
-                job_factory_downcast.as_job_factory_mut().create()
+                job_factory_downcast.as_base_mut::<JobFactory>().create()
             );
         }
         Err(_) => {

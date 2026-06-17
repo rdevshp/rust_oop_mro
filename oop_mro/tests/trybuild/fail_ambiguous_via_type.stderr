@@ -1,4 +1,4 @@
-warning: use of deprecated constant `_::__OOP_MRO_WARNING`: ambiguous base `Root` in class `Branch`: normal `as_root` accessors are omitted; use type-directed via accessors such as `as_base_via::<Left, Root>()`, `as_base_via::<Right, Root>()`
+warning: use of deprecated constant `_::__OOP_MRO_WARNING`: ambiguous base `Root` in class `Branch`: `as_base::<Root>()` is unavailable because the target is not unique; use path-directed casts such as `as_base_via::<Left, Root>()`, `as_base_via::<Right, Root>()`
  --> tests/trybuild/fail_ambiguous_via_type.rs:3:1
   |
 3 | / oop_class! {
@@ -13,7 +13,7 @@ warning: use of deprecated constant `_::__OOP_MRO_WARNING`: ambiguous base `Root
   = note: `#[warn(deprecated)]` on by default
   = note: this warning originates in the macro `oop_class` (in Nightly builds, run with -Z macro-backtrace for more info)
 
-warning: use of deprecated constant `_::__OOP_MRO_WARNING`: ambiguous base `Root` in class `Diamond`: normal `as_root` accessors are omitted; use type-directed via accessors such as `as_base_via::<Left, Root>()`, `as_base_via::<(Branch, Left), Root>()`, `as_base_via::<Right, Root>()`, `as_base_via::<(Branch, Right), Root>()`
+warning: use of deprecated constant `_::__OOP_MRO_WARNING`: ambiguous base `Root` in class `Diamond`: `as_base::<Root>()` is unavailable because the target is not unique; use path-directed casts such as `as_base_via::<Left, Root>()`, `as_base_via::<(Branch, Left), Root>()`, `as_base_via::<Right, Root>()`, `as_base_via::<(Branch, Right), Root>()`
  --> tests/trybuild/fail_ambiguous_via_type.rs:3:1
   |
 3 | / oop_class! {

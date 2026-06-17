@@ -34,7 +34,7 @@ oop_class! {
 
         #[override]
         virtual fn dispatched(&self) -> usize {
-            self.as_root().value() + 10
+            self.as_base::<Root>().value() + 10
         }
     }
 }
@@ -43,11 +43,11 @@ fn main() {
     let mut diamond = Diamond::new();
 
     assert!(core::ptr::eq(
-        diamond.as_left().as_root(),
-        diamond.as_right().as_root(),
+        diamond.as_base::<Left>().as_base::<Root>(),
+        diamond.as_base::<Right>().as_base::<Root>(),
     ));
-    assert_eq!(diamond.as_root().value(), 3);
-    diamond.as_right_mut().as_root_mut().set_value(4);
-    assert_eq!(diamond.as_left().as_root().value(), 4);
-    assert_eq!(diamond.as_root().dispatched(), 14);
+    assert_eq!(diamond.as_base::<Root>().value(), 3);
+    diamond.as_base_mut::<Right>().as_base_mut::<Root>().set_value(4);
+    assert_eq!(diamond.as_base::<Left>().as_base::<Root>().value(), 4);
+    assert_eq!(diamond.as_base::<Root>().dispatched(), 14);
 }

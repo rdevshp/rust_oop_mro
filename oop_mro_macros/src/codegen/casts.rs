@@ -10,9 +10,7 @@ pub(super) fn generate_base_cast_trait(
     let private_module = private_module_ident(graph);
     let (trait_generics, _, where_clause) = class.generics.split_for_impl();
     let class_ty = class_type_tokens(class);
-    let shared_name = base_cast_method_ident(&graph.names[index], false);
-    let mutable_name = base_cast_method_ident(&graph.names[index], true);
-    let supertraits = class
+    let base_trait_supertraits = class
         .bases
         .iter()
         .filter_map(|base| {
@@ -26,6 +24,7 @@ pub(super) fn generate_base_cast_trait(
             }
         })
         .collect::<Vec<_>>();
+    let supertraits = base_trait_supertraits;
     let supertrait_bound = (!supertraits.is_empty()).then(|| {
         quote! {
             : #(#supertraits)+*
@@ -33,8 +32,11 @@ pub(super) fn generate_base_cast_trait(
     });
     quote! {
         #vis trait #trait_name #trait_generics #supertrait_bound #where_clause {
-            fn #shared_name(&self) -> &#class_ty;
-            fn #mutable_name(&mut self) -> &mut #class_ty;
+            #[doc(hidden)]
+            fn __oop_as_self(&self) -> &#class_ty;
+
+            #[doc(hidden)]
+            fn __oop_as_self_mut(&mut self) -> &mut #class_ty;
 
             #[doc(hidden)]
             fn __oop_complete_class_id(&self) -> usize;
@@ -59,7 +61,12 @@ pub(super) fn generate_base_cast_impls(graph: &Graph) -> TokenStream2 {
         .flat_map(|(class_index, class)| {
             ancestor_views(graph, class_index)
                 .into_iter()
-                .map(move |view| generate_base_cast_impl(graph, class_index, &view, class))
+                .flat_map(move |view| {
+                    [
+                        generate_base_cast_impl(graph, class_index, &view, class),
+                        generate_dyn_base_cast_impl(graph, class_index, &view, class),
+                    ]
+                })
         });
     let via_impls = graph
         .classes
@@ -95,8 +102,6 @@ fn generate_base_cast_impl(
     let class_ty = class_type_tokens(class);
     let base_ty = &view.actual;
     let trait_path = base_cast_trait_for_actual_class(graph, base_index, base_ty);
-    let shared_name = base_cast_method_ident(&graph.names[base_index], false);
-    let mutable_name = base_cast_method_ident(&graph.names[base_index], true);
     let has_virtual_edge = path_has_virtual_edge_for_path(graph, class_index, &view.path);
     let shared_body = if class_index == base_index && view.path.is_empty() {
         quote! { self }
@@ -114,14 +119,26 @@ fn generate_base_cast_impl(
     };
     let private_module = private_module_ident(graph);
     let source_id = subobject_id(graph, class_index, &view.path);
+    let oop_shared_body = shared_body.clone();
+    let oop_mutable_body = mutable_body.clone();
 
     quote! {
+        impl #impl_generics ::oop_mro::OopBase<#base_ty> for #class_ty #where_clause {
+            fn __oop_as_base(&self) -> &#base_ty {
+                #oop_shared_body
+            }
+
+            fn __oop_as_base_mut(&mut self) -> &mut #base_ty {
+                #oop_mutable_body
+            }
+        }
+
         impl #impl_generics #trait_path for #class_ty #where_clause {
-            fn #shared_name(&self) -> &#base_ty {
+            fn __oop_as_self(&self) -> &#base_ty {
                 #shared_body
             }
 
-            fn #mutable_name(&mut self) -> &mut #base_ty {
+            fn __oop_as_self_mut(&mut self) -> &mut #base_ty {
                 #mutable_body
             }
 
@@ -139,6 +156,35 @@ fn generate_base_cast_impl(
 
             fn __oop_cast_seal(&self) -> #private_module::Seal {
                 #private_module::Seal
+            }
+        }
+    }
+}
+
+fn generate_dyn_base_cast_impl(
+    graph: &Graph,
+    class_index: usize,
+    view: &AncestorView,
+    class: &ClassDef,
+) -> TokenStream2 {
+    let (impl_generics, _, where_clause) = class.generics.split_for_impl();
+    let class_ty = class_type_tokens(class);
+    let class_actual = class_type(class);
+    let source_trait = base_cast_trait_for_actual_class(graph, class_index, &class_actual);
+    let target_ty = &view.actual;
+
+    quote! {
+        impl #impl_generics ::oop_mro::OopBase<#target_ty> for dyn #source_trait + '_ #where_clause {
+            fn __oop_as_base(&self) -> &#target_ty {
+                <#class_ty as ::oop_mro::OopBase<#target_ty>>::__oop_as_base(
+                    <dyn #source_trait as #source_trait>::__oop_as_self(self),
+                )
+            }
+
+            fn __oop_as_base_mut(&mut self) -> &mut #target_ty {
+                <#class_ty as ::oop_mro::OopBase<#target_ty>>::__oop_as_base_mut(
+                    <dyn #source_trait as #source_trait>::__oop_as_self_mut(self),
+                )
             }
         }
     }
@@ -182,8 +228,6 @@ fn generate_dyn_base_via_impl(
     let class_ty = class_type_tokens(class);
     let class_actual = class_type(class);
     let trait_path = base_cast_trait_for_actual_class(graph, class_index, &class_actual);
-    let shared_name = base_cast_method_ident(&graph.names[class_index], false);
-    let mutable_name = base_cast_method_ident(&graph.names[class_index], true);
     let via_ty = &view.via;
     let target_ty = &view.actual;
 
@@ -191,13 +235,13 @@ fn generate_dyn_base_via_impl(
         impl #impl_generics ::oop_mro::OopBaseVia<#via_ty, #target_ty> for dyn #trait_path + '_ #where_clause {
             fn __oop_as_base_via(&self) -> &#target_ty {
                 <#class_ty as ::oop_mro::OopBaseVia<#via_ty, #target_ty>>::__oop_as_base_via(
-                    self.#shared_name(),
+                    <dyn #trait_path as #trait_path>::__oop_as_self(self),
                 )
             }
 
             fn __oop_as_base_via_mut(&mut self) -> &mut #target_ty {
                 <#class_ty as ::oop_mro::OopBaseVia<#via_ty, #target_ty>>::__oop_as_base_via_mut(
-                    self.#mutable_name(),
+                    <dyn #trait_path as #trait_path>::__oop_as_self_mut(self),
                 )
             }
         }
@@ -505,8 +549,6 @@ fn generate_owned_base_via_wrapper(
             full_path.extend(trait_view.path);
             let trait_actual = ancestor_type_for_path(graph, complete_index, &full_path);
             let trait_path = base_cast_trait_for_actual_class(graph, trait_index, &trait_actual);
-            let shared_name = base_cast_method_ident(&graph.names[trait_index], false);
-            let mutable_name = base_cast_method_ident(&graph.names[trait_index], true);
             let shared_body = static_ref_expr_for_path(
                 graph,
                 complete_index,
@@ -522,14 +564,26 @@ fn generate_owned_base_via_wrapper(
                 true,
             );
             let source_id = subobject_id(graph, complete_index, &full_path);
+            let oop_shared_body = shared_body.clone();
+            let oop_mutable_body = mutable_body.clone();
 
             quote! {
+                impl #impl_generics ::oop_mro::OopBase<#trait_actual> for #wrapper_ty #where_clause {
+                    fn __oop_as_base(&self) -> &#trait_actual {
+                        #oop_shared_body
+                    }
+
+                    fn __oop_as_base_mut(&mut self) -> &mut #trait_actual {
+                        #oop_mutable_body
+                    }
+                }
+
                 impl #impl_generics #trait_path for #wrapper_ty #where_clause {
-                    fn #shared_name(&self) -> &#trait_actual {
+                    fn __oop_as_self(&self) -> &#trait_actual {
                         #shared_body
                     }
 
-                    fn #mutable_name(&mut self) -> &mut #trait_actual {
+                    fn __oop_as_self_mut(&mut self) -> &mut #trait_actual {
                         #mutable_body
                     }
 

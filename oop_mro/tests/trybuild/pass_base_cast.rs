@@ -18,6 +18,6 @@ oop_class! {
 
 fn main() {
     let mut derived = Derived::default();
-    derived.as_base_mut().set_local(42);
-    assert_eq!(derived.as_base().local(), 42);
+    derived.as_base_mut::<Base>().set_local(42);
+    assert_eq!(derived.as_base::<Base>().local(), 42);
 }

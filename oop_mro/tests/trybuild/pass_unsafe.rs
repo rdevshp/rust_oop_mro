@@ -23,6 +23,6 @@ fn main() {
     unsafe {
         assert_eq!(sensor.raw(), 7);
         assert_eq!(sensor.read(), 42);
-        assert_eq!(sensor.as_device().read(), 42);
+        assert_eq!(sensor.as_base::<Device>().read(), 42);
     }
 }

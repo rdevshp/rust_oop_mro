@@ -24,7 +24,7 @@ oop_class! {
 
         #[override]
         virtual fn record(&mut self, label: String) {
-            self.as_animal_mut().events.push(format!("dog:{label}"));
+            self.as_base_mut::<Animal>().events.push(format!("dog:{label}"));
         }
     }
 }
@@ -32,7 +32,7 @@ oop_class! {
 fn main() {
     let dog = Dog::new();
     assert_eq!(
-        dog.as_animal().events(),
+        dog.as_base::<Animal>().events(),
         vec!["dog:base".to_string(), "dog:derived".to_string()]
     );
 }

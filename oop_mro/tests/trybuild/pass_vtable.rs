@@ -23,7 +23,7 @@ oop_class! {
 fn main() {
     let dog = Dog::default();
     let cat = Cat::default();
-    let animals: Vec<&Animal> = vec![dog.as_animal(), cat.as_animal()];
+    let animals: Vec<&Animal> = vec![dog.as_base::<Animal>(), cat.as_base::<Animal>()];
     let sounds: Vec<_> = animals.iter().map(|animal| animal.speak()).collect();
 
     assert_eq!(sounds, ["woof", "meow"]);

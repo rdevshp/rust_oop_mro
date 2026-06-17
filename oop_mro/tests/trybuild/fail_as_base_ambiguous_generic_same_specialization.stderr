@@ -1,5 +1,5 @@
 warning: use of deprecated constant `_::__OOP_MRO_WARNING`: ambiguous base `Slot` in class `Diamond`: `as_base::<Slot < i32 >>()` is unavailable because the target is not unique; use path-directed casts such as `as_base_via::<Left, Slot < i32 >>()`, `as_base_via::<Right, Slot < i32 >>()`
-  --> tests/trybuild/fail_ambiguous_generic_same_specialization.rs:3:1
+  --> tests/trybuild/fail_as_base_ambiguous_generic_same_specialization.rs:3:1
    |
  3 | / oop_class! {
  4 | |     class Slot<T> {
@@ -13,13 +13,13 @@ warning: use of deprecated constant `_::__OOP_MRO_WARNING`: ambiguous base `Slot
    = note: this warning originates in the macro `oop_class` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0277]: the trait bound `Diamond: OopBase<Slot<i32>>` is not satisfied
-  --> tests/trybuild/fail_ambiguous_generic_same_specialization.rs:14:21
+  --> tests/trybuild/fail_as_base_ambiguous_generic_same_specialization.rs:14:21
    |
 14 |     let _ = diamond.as_base::<Slot<i32>>();
    |                     ^^^^^^^ unsatisfied trait bound
    |
 help: the trait `OopBase<Slot<i32>>` is not implemented for `Diamond`
-  --> tests/trybuild/fail_ambiguous_generic_same_specialization.rs:3:1
+  --> tests/trybuild/fail_as_base_ambiguous_generic_same_specialization.rs:3:1
    |
  3 | / oop_class! {
  4 | |     class Slot<T> {
@@ -29,7 +29,7 @@ help: the trait `OopBase<Slot<i32>>` is not implemented for `Diamond`
  9 | |     class Diamond: Left, Right {}
    | |_________________^
 help: the following other types implement trait `OopBase<Target>`
-  --> tests/trybuild/fail_ambiguous_generic_same_specialization.rs:3:1
+  --> tests/trybuild/fail_as_base_ambiguous_generic_same_specialization.rs:3:1
    |
  3 | / oop_class! {
  4 | |     class Slot<T> {

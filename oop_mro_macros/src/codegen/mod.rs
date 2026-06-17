@@ -13,13 +13,12 @@ use crate::generics::{
 };
 use crate::model::{Graph, MethodInfo, ReceiverKind, VtableSlot};
 use crate::names::{
-    base_cast_method_ident, base_field_ident, default_base_trait_ident, private_module_ident,
-    static_field_ident, to_snake, virtual_base_field_ident, virtual_impl_ident,
-    vtable_cast_mut_field_ident, vtable_cast_mut_function_ident, vtable_cast_ref_field_ident,
-    vtable_cast_ref_function_ident, vtable_downcast_mut_field_ident,
-    vtable_downcast_mut_function_ident, vtable_downcast_ref_field_ident,
-    vtable_downcast_ref_function_ident, vtable_factory_ident, vtable_field_ident,
-    vtable_function_ident, vtable_ident,
+    base_field_ident, default_base_trait_ident, private_module_ident, static_field_ident, to_snake,
+    virtual_base_field_ident, virtual_impl_ident, vtable_cast_mut_field_ident,
+    vtable_cast_mut_function_ident, vtable_cast_ref_field_ident, vtable_cast_ref_function_ident,
+    vtable_downcast_mut_field_ident, vtable_downcast_mut_function_ident,
+    vtable_downcast_ref_field_ident, vtable_downcast_ref_function_ident, vtable_factory_ident,
+    vtable_field_ident, vtable_function_ident, vtable_ident,
 };
 use crate::types::{
     ancestor_type, ancestor_type_for_path, async_dispatch_lifetime, async_output_type,
@@ -521,10 +520,10 @@ fn ambiguous_base_warnings(graph: &Graph) -> Vec<String> {
                 .collect::<Vec<_>>();
             let suggestion_list = suggestions.join("`, `");
             warnings.push(format!(
-                "ambiguous base `{}` in class `{}`: normal `as_{}` accessors are omitted; use type-directed via accessors such as `{}`",
+                "ambiguous base `{}` in class `{}`: `as_base::<{}>()` is unavailable because the target is not unique; use path-directed casts such as `{}`",
                 graph.names[target],
                 graph.names[start],
-                to_snake(&graph.names[target]),
+                group.views[0].actual.to_token_stream(),
                 suggestion_list
             ));
         }

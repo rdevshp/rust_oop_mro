@@ -37,8 +37,8 @@ oop_class! {
 
 fn main() {
     let diamond = Diamond::new();
-    let left_slot: &Slot<i32> = <Diamond as AsSlot<i32>>::as_slot(&diamond);
-    let right_slot: &Slot<String> = <Diamond as AsSlot<String>>::as_slot(&diamond);
+    let left_slot: &Slot<i32> = diamond.as_base::<Slot<i32>>();
+    let right_slot: &Slot<String> = diamond.as_base::<Slot<String>>();
 
     assert_eq!(left_slot.label(), "int");
     assert_eq!(right_slot.label(), "string");

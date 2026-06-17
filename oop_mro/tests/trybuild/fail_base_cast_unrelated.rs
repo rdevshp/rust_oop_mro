@@ -8,5 +8,5 @@ oop_class! {
 
 fn main() {
     let cat = Cat::default();
-    let _ = cat.as_walker();
+    let _ = cat.as_base::<Walker>();
 }
