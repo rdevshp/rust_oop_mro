@@ -52,33 +52,6 @@ fn generate_box_downcast_impls(graph: &Graph) -> TokenStream2 {
     }
 }
 
-fn compatible_owned_downcast_generics(graph: &Graph, target: usize, complete: usize) -> bool {
-    if target == complete {
-        return true;
-    }
-
-    if graph.classes[target].generics.params.is_empty()
-        && graph.classes[complete].generics.params.is_empty()
-    {
-        return true;
-    }
-
-    generic_params_key(&graph.classes[target].generics)
-        == generic_params_key(&graph.classes[complete].generics)
-}
-
-fn generic_params_key(generics: &Generics) -> Vec<String> {
-    generics
-        .params
-        .iter()
-        .map(|param| match param {
-            GenericParam::Type(param) => param.ident.to_string(),
-            GenericParam::Lifetime(param) => param.lifetime.ident.to_string(),
-            GenericParam::Const(param) => param.ident.to_string(),
-        })
-        .collect()
-}
-
 fn generate_box_downcast_impl(
     graph: &Graph,
     source: usize,
@@ -116,9 +89,8 @@ fn generate_box_downcast_impl(
                 &candidate.target_path,
                 target,
             ));
-            let complete_ty = class_type_tokens(&graph.classes[complete]);
-            let (_, wrapper_ty_generics, _) = graph.classes[complete].generics.split_for_impl();
-            let wrapper_expr_generics = wrapper_ty_generics.as_turbofish();
+            let complete_ty = &candidate.complete_actual;
+            let wrapper_ty = type_with_replaced_ident_expr_path(complete_ty, wrapper);
             quote! {
                 (#complete, #source_id) => {
                     let data = <dyn #source_trait as #source_trait>::__oop_into_complete_owned(source);
@@ -126,7 +98,7 @@ fn generate_box_downcast_impl(
                         ::std::boxed::Box::from_raw(data as *mut #complete_ty)
                     };
                     let target: ::std::boxed::Box<dyn #target_trait> =
-                        ::std::boxed::Box::new(#wrapper #wrapper_expr_generics { complete });
+                        ::std::boxed::Box::new(#wrapper_ty { complete });
                     ::core::result::Result::Ok(target)
                 }
             }
@@ -180,6 +152,7 @@ struct OwnedDowncastCandidate {
     complete: usize,
     source_id: usize,
     target_path: Vec<usize>,
+    complete_actual: Type,
 }
 
 fn owned_downcast_candidates(
@@ -189,8 +162,6 @@ fn owned_downcast_candidates(
     source_ty: &Type,
     target_ty: &Type,
 ) -> Vec<OwnedDowncastCandidate> {
-    let source_key = type_key(source_ty);
-    let target_key = type_key(target_ty);
     let mut grouped: Vec<(String, Vec<OwnedDowncastCandidate>)> = Vec::new();
 
     for (complete, class) in graph.classes.iter().enumerate() {
@@ -200,22 +171,29 @@ fn owned_downcast_candidates(
         if !graph.mros[complete].contains(&source) || !graph.mros[complete].contains(&target) {
             continue;
         }
-        if !compatible_owned_downcast_generics(graph, target, complete) {
-            continue;
-        }
 
         let source_views = subobject_views(graph, complete)
             .into_iter()
-            .filter(|view| view.class_index == source && type_key(&view.actual) == source_key)
+            .filter(|view| view.class_index == source)
             .collect::<Vec<_>>();
         let target_views = subobject_views(graph, complete)
             .into_iter()
-            .filter(|view| view.class_index == target && type_key(&view.actual) == target_key)
+            .filter(|view| view.class_index == target)
             .collect::<Vec<_>>();
 
         for source_view in &source_views {
             let source_id = subobject_id(graph, complete, &source_view.path);
             for target_view in &target_views {
+                let Some(complete_actual) = actual_class_type_for_candidate(
+                    graph,
+                    complete,
+                    &[
+                        (source_view.actual.clone(), source_ty.clone()),
+                        (target_view.actual.clone(), target_ty.clone()),
+                    ],
+                ) else {
+                    continue;
+                };
                 if !target_path_contains_source_path(
                     graph,
                     complete,
@@ -231,6 +209,7 @@ fn owned_downcast_candidates(
                     complete,
                     source_id,
                     target_path: target_view.path.clone(),
+                    complete_actual,
                 };
                 if let Some((_, candidates)) =
                     grouped.iter_mut().find(|(group_key, _)| group_key == &key)

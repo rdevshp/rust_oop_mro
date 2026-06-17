@@ -2,7 +2,11 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote, ToTokens};
-use syn::{parse_quote, GenericParam, Generics, Ident, Type};
+use syn::visit_mut::{self, VisitMut};
+use syn::{
+    parse_quote, Expr, GenericArgument, GenericParam, Generics, Ident, Lifetime, PathArguments,
+    Type,
+};
 
 use crate::ast::{
     AssociatedConstDef, ClassDef, ClassItem, ConstructorDef, MethodDef, StaticFieldDef,
@@ -105,6 +109,346 @@ fn interface_methods(graph: &Graph, index: usize) -> Vec<MethodInfo> {
     }
 
     methods.into_values().collect()
+}
+
+#[derive(Default)]
+struct CandidateGenericParams {
+    types: HashSet<String>,
+    lifetimes: HashSet<String>,
+    consts: HashSet<String>,
+}
+
+#[derive(Default)]
+struct ActualGenericSubstitutions {
+    types: HashMap<String, Type>,
+    lifetimes: HashMap<String, Lifetime>,
+    consts: HashMap<String, Expr>,
+}
+
+fn actual_class_type_for_candidate(
+    graph: &Graph,
+    complete: usize,
+    constraints: &[(Type, Type)],
+) -> Option<Type> {
+    let params = candidate_generic_params(&graph.classes[complete].generics);
+    let mut substitutions = ActualGenericSubstitutions::default();
+
+    for (pattern, expected) in constraints {
+        if !unify_candidate_type(pattern, expected, &params, &mut substitutions) {
+            return None;
+        }
+    }
+
+    if !params
+        .types
+        .iter()
+        .all(|param| substitutions.types.contains_key(param))
+        || !params
+            .lifetimes
+            .iter()
+            .all(|param| substitutions.lifetimes.contains_key(param))
+        || !params
+            .consts
+            .iter()
+            .all(|param| substitutions.consts.contains_key(param))
+    {
+        return None;
+    }
+
+    let mut actual = class_type(&graph.classes[complete]);
+    let mut substituter = ActualGenericSubstituter { substitutions };
+    substituter.visit_type_mut(&mut actual);
+    Some(actual)
+}
+
+fn type_with_replaced_ident_expr_path(ty: &Type, ident: Ident) -> TokenStream2 {
+    let Type::Path(path) = ty else {
+        return quote! { #ident };
+    };
+    if path.qself.is_some() || path.path.segments.len() != 1 {
+        return quote! { #ident };
+    }
+
+    match &path.path.segments[0].arguments {
+        PathArguments::AngleBracketed(arguments) => quote! { #ident::#arguments },
+        PathArguments::None | PathArguments::Parenthesized(_) => quote! { #ident },
+    }
+}
+
+fn candidate_generic_params(generics: &Generics) -> CandidateGenericParams {
+    let mut params = CandidateGenericParams::default();
+    for param in &generics.params {
+        match param {
+            GenericParam::Type(param) => {
+                params.types.insert(param.ident.to_string());
+            }
+            GenericParam::Lifetime(param) => {
+                params.lifetimes.insert(param.lifetime.ident.to_string());
+            }
+            GenericParam::Const(param) => {
+                params.consts.insert(param.ident.to_string());
+            }
+        }
+    }
+    params
+}
+
+fn unify_candidate_type(
+    pattern: &Type,
+    expected: &Type,
+    params: &CandidateGenericParams,
+    substitutions: &mut ActualGenericSubstitutions,
+) -> bool {
+    if let Some(param) = bare_type_param(pattern, params) {
+        return bind_type_param(param, expected.clone(), substitutions);
+    }
+
+    match (pattern, expected) {
+        (Type::Path(pattern), Type::Path(expected))
+            if pattern.qself.is_none() && expected.qself.is_none() =>
+        {
+            if pattern.path.segments.len() != expected.path.segments.len() {
+                return type_key(&Type::Path(pattern.clone()))
+                    == type_key(&Type::Path(expected.clone()));
+            }
+
+            for (pattern, expected) in pattern.path.segments.iter().zip(&expected.path.segments) {
+                if pattern.ident != expected.ident {
+                    return false;
+                }
+                if !unify_candidate_path_arguments(
+                    &pattern.arguments,
+                    &expected.arguments,
+                    params,
+                    substitutions,
+                ) {
+                    return false;
+                }
+            }
+
+            true
+        }
+        (Type::Reference(pattern), Type::Reference(expected)) => {
+            match (&pattern.lifetime, &expected.lifetime) {
+                (Some(pattern), Some(expected)) => {
+                    if !unify_candidate_lifetime(pattern, expected, params, substitutions) {
+                        return false;
+                    }
+                }
+                (None, None) => {}
+                _ => return false,
+            }
+            unify_candidate_type(&pattern.elem, &expected.elem, params, substitutions)
+        }
+        (Type::Tuple(pattern), Type::Tuple(expected)) => {
+            pattern.elems.len() == expected.elems.len()
+                && pattern
+                    .elems
+                    .iter()
+                    .zip(&expected.elems)
+                    .all(|(pattern, expected)| {
+                        unify_candidate_type(pattern, expected, params, substitutions)
+                    })
+        }
+        (Type::Array(pattern), Type::Array(expected)) => {
+            unify_candidate_type(&pattern.elem, &expected.elem, params, substitutions)
+                && unify_candidate_expr(&pattern.len, &expected.len, params, substitutions)
+        }
+        _ => type_key(pattern) == type_key(expected),
+    }
+}
+
+fn unify_candidate_path_arguments(
+    pattern: &PathArguments,
+    expected: &PathArguments,
+    params: &CandidateGenericParams,
+    substitutions: &mut ActualGenericSubstitutions,
+) -> bool {
+    match (pattern, expected) {
+        (PathArguments::None, PathArguments::None) => true,
+        (PathArguments::AngleBracketed(pattern), PathArguments::AngleBracketed(expected)) => {
+            pattern.args.len() == expected.args.len()
+                && pattern
+                    .args
+                    .iter()
+                    .zip(&expected.args)
+                    .all(|(pattern, expected)| {
+                        unify_candidate_generic_argument(pattern, expected, params, substitutions)
+                    })
+        }
+        _ => pattern.to_token_stream().to_string() == expected.to_token_stream().to_string(),
+    }
+}
+
+fn unify_candidate_generic_argument(
+    pattern: &GenericArgument,
+    expected: &GenericArgument,
+    params: &CandidateGenericParams,
+    substitutions: &mut ActualGenericSubstitutions,
+) -> bool {
+    match (pattern, expected) {
+        (GenericArgument::Type(pattern), GenericArgument::Type(expected)) => {
+            unify_candidate_type(pattern, expected, params, substitutions)
+        }
+        (GenericArgument::Lifetime(pattern), GenericArgument::Lifetime(expected)) => {
+            unify_candidate_lifetime(pattern, expected, params, substitutions)
+        }
+        (GenericArgument::Const(pattern), GenericArgument::Const(expected)) => {
+            unify_candidate_expr(pattern, expected, params, substitutions)
+        }
+        _ => pattern.to_token_stream().to_string() == expected.to_token_stream().to_string(),
+    }
+}
+
+fn unify_candidate_lifetime(
+    pattern: &Lifetime,
+    expected: &Lifetime,
+    params: &CandidateGenericParams,
+    substitutions: &mut ActualGenericSubstitutions,
+) -> bool {
+    let name = pattern.ident.to_string();
+    if params.lifetimes.contains(&name) {
+        return bind_lifetime_param(name, expected.clone(), substitutions);
+    }
+
+    pattern == expected
+}
+
+fn unify_candidate_expr(
+    pattern: &Expr,
+    expected: &Expr,
+    params: &CandidateGenericParams,
+    substitutions: &mut ActualGenericSubstitutions,
+) -> bool {
+    if let Some(param) = bare_const_param(pattern, params) {
+        return bind_const_param(param, expected.clone(), substitutions);
+    }
+
+    pattern.to_token_stream().to_string() == expected.to_token_stream().to_string()
+}
+
+fn bare_type_param(ty: &Type, params: &CandidateGenericParams) -> Option<String> {
+    let Type::Path(path) = ty else {
+        return None;
+    };
+    if path.qself.is_some() || path.path.segments.len() != 1 {
+        return None;
+    }
+    let segment = &path.path.segments[0];
+    if !matches!(segment.arguments, PathArguments::None) {
+        return None;
+    }
+    let name = segment.ident.to_string();
+    params.types.contains(&name).then_some(name)
+}
+
+fn bare_const_param(expr: &Expr, params: &CandidateGenericParams) -> Option<String> {
+    let Expr::Path(path) = expr else {
+        return None;
+    };
+    if path.qself.is_some() || path.path.segments.len() != 1 {
+        return None;
+    }
+    let name = path.path.segments[0].ident.to_string();
+    params.consts.contains(&name).then_some(name)
+}
+
+fn bind_type_param(
+    param: String,
+    ty: Type,
+    substitutions: &mut ActualGenericSubstitutions,
+) -> bool {
+    if let Some(existing) = substitutions.types.get(&param) {
+        type_key(existing) == type_key(&ty)
+    } else {
+        substitutions.types.insert(param, ty);
+        true
+    }
+}
+
+fn bind_lifetime_param(
+    param: String,
+    lifetime: Lifetime,
+    substitutions: &mut ActualGenericSubstitutions,
+) -> bool {
+    if let Some(existing) = substitutions.lifetimes.get(&param) {
+        existing == &lifetime
+    } else {
+        substitutions.lifetimes.insert(param, lifetime);
+        true
+    }
+}
+
+fn bind_const_param(
+    param: String,
+    expr: Expr,
+    substitutions: &mut ActualGenericSubstitutions,
+) -> bool {
+    if let Some(existing) = substitutions.consts.get(&param) {
+        existing.to_token_stream().to_string() == expr.to_token_stream().to_string()
+    } else {
+        substitutions.consts.insert(param, expr);
+        true
+    }
+}
+
+struct ActualGenericSubstituter {
+    substitutions: ActualGenericSubstitutions,
+}
+
+impl VisitMut for ActualGenericSubstituter {
+    fn visit_type_mut(&mut self, node: &mut Type) {
+        if let Some(param) = bare_type_name(node) {
+            if let Some(replacement) = self.substitutions.types.get(&param) {
+                *node = replacement.clone();
+                return;
+            }
+        }
+
+        visit_mut::visit_type_mut(self, node);
+    }
+
+    fn visit_lifetime_mut(&mut self, node: &mut Lifetime) {
+        let name = node.ident.to_string();
+        if let Some(replacement) = self.substitutions.lifetimes.get(&name) {
+            *node = replacement.clone();
+            return;
+        }
+
+        visit_mut::visit_lifetime_mut(self, node);
+    }
+
+    fn visit_expr_mut(&mut self, node: &mut Expr) {
+        if let Some(param) = bare_const_name(node) {
+            if let Some(replacement) = self.substitutions.consts.get(&param) {
+                *node = replacement.clone();
+                return;
+            }
+        }
+
+        visit_mut::visit_expr_mut(self, node);
+    }
+}
+
+fn bare_type_name(ty: &Type) -> Option<String> {
+    let Type::Path(path) = ty else {
+        return None;
+    };
+    if path.qself.is_some() || path.path.segments.len() != 1 {
+        return None;
+    }
+    let segment = &path.path.segments[0];
+    matches!(segment.arguments, PathArguments::None).then(|| segment.ident.to_string())
+}
+
+fn bare_const_name(expr: &Expr) -> Option<String> {
+    let Expr::Path(path) = expr else {
+        return None;
+    };
+    if path.qself.is_some() || path.path.segments.len() != 1 {
+        return None;
+    }
+    Some(path.path.segments[0].ident.to_string())
 }
 
 fn has_virtual_interface(graph: &Graph, index: usize) -> bool {

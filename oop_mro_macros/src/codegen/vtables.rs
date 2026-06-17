@@ -13,21 +13,21 @@ pub(super) fn generate_vtable_struct(
     let downcast_ref = vtable_downcast_ref_field_ident();
     let downcast_mut = vtable_downcast_mut_field_ident();
     let fields = interface_methods(graph, index).into_iter().map(|method| {
+        let sig = signature_in_context(graph, index, &method);
         let field = vtable_field_ident(&method.name);
-        let unsafety = &method.sig.unsafety;
+        let unsafety = &sig.unsafety;
 
-        if method.sig.asyncness.is_some() {
+        if sig.asyncness.is_some() {
             let lifetime = async_dispatch_lifetime();
             let receiver = match method.receiver {
                 ReceiverKind::Shared => quote! { &#lifetime #class_ty },
                 ReceiverKind::Mutable => quote! { &#lifetime mut #class_ty },
             };
-            let arg_types = method
-                .arg_types
+            let arg_types = signature_arg_types(&sig)
                 .iter()
                 .map(|ty| type_with_elided_refs_lifetime(ty, &lifetime))
                 .collect::<Vec<_>>();
-            let output = async_output_type(&method.sig, &lifetime);
+            let output = async_output_type(&sig, &lifetime);
             let future = boxed_future_type(output, &lifetime);
 
             quote! {
@@ -38,8 +38,8 @@ pub(super) fn generate_vtable_struct(
                 ReceiverKind::Shared => quote! { &#class_ty },
                 ReceiverKind::Mutable => quote! { &mut #class_ty },
             };
-            let arg_types = &method.arg_types;
-            let output = &method.sig.output;
+            let arg_types = signature_arg_types(&sig);
+            let output = &sig.output;
 
             quote! {
                 #field: #unsafety fn(#receiver #(, #arg_types)*) #output
@@ -75,6 +75,17 @@ pub(super) fn generate_vtable_items(graph: &Graph) -> TokenStream2 {
     quote! {
         #(#items)*
     }
+}
+
+fn signature_arg_types(sig: &syn::Signature) -> Vec<Type> {
+    sig.inputs
+        .iter()
+        .skip(1)
+        .filter_map(|arg| match arg {
+            syn::FnArg::Typed(typed) => Some((*typed.ty).clone()),
+            syn::FnArg::Receiver(_) => None,
+        })
+        .collect()
 }
 
 fn generate_vtable_for_class_as(
@@ -307,7 +318,9 @@ fn generate_vtable_function(
     let function = vtable_function_ident(graph, class_index, vtable_slot, &method.name);
     let receiver_ty = ancestor_type_for_path(graph, class_index, &vtable_slot.path);
     let arg_idents = &method.arg_idents;
-    let substitutions = substitutions_for_class_type(&graph.classes[vtable_index], &receiver_ty);
+    let owner_path = selected_owner_path(graph, class_index, vtable_slot, method.owner);
+    let owner_ty = ancestor_type_for_path(graph, class_index, &owner_path);
+    let substitutions = substitutions_for_class_type(&graph.classes[method.owner], &owner_ty);
     let arg_types = method
         .arg_types
         .iter()
@@ -417,7 +430,9 @@ fn generate_async_vtable_function(
     let function = vtable_function_ident(graph, class_index, vtable_slot, &method.name);
     let receiver_ty = ancestor_type_for_path(graph, class_index, &vtable_slot.path);
     let arg_idents = &method.arg_idents;
-    let substitutions = substitutions_for_class_type(&graph.classes[vtable_index], &receiver_ty);
+    let owner_path = selected_owner_path(graph, class_index, vtable_slot, method.owner);
+    let owner_ty = ancestor_type_for_path(graph, class_index, &owner_path);
+    let substitutions = substitutions_for_class_type(&graph.classes[method.owner], &owner_ty);
     let lifetime = async_dispatch_lifetime();
     let arg_types = method
         .arg_types

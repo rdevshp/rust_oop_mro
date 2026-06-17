@@ -230,9 +230,8 @@ fn generate_dyn_owned_base_via_items(
             ));
             let complete = candidate.complete;
             let source_id = candidate.source_id;
-            let complete_ty = class_type_tokens(&graph.classes[complete]);
-            let (_, wrapper_ty_generics, _) = graph.classes[complete].generics.split_for_impl();
-            let wrapper_expr_generics = wrapper_ty_generics.as_turbofish();
+            let complete_ty = &candidate.complete_actual;
+            let wrapper_ty = type_with_replaced_ident_expr_path(complete_ty, wrapper);
             quote! {
                 (#complete, #source_id) => {
                     let raw =
@@ -241,7 +240,7 @@ fn generate_dyn_owned_base_via_items(
                         ::std::boxed::Box::from_raw(raw as *mut #complete_ty)
                     };
                     let target: ::std::boxed::Box<dyn #target_trait> =
-                        ::std::boxed::Box::new(#wrapper #wrapper_expr_generics { complete });
+                        ::std::boxed::Box::new(#wrapper_ty { complete });
                     target
                 }
             }
@@ -273,6 +272,7 @@ struct OwnedBaseViaCandidate {
     complete: usize,
     source_id: usize,
     path: Vec<usize>,
+    complete_actual: Type,
 }
 
 fn owned_base_via_complete_candidates(
@@ -281,7 +281,6 @@ fn owned_base_via_complete_candidates(
     view: &BaseViaView,
 ) -> Vec<OwnedBaseViaCandidate> {
     let source_actual = class_type(&graph.classes[source_index]);
-    let target_key = type_key(&view.actual);
     let mut candidates = Vec::new();
 
     for (complete, class) in graph.classes.iter().enumerate() {
@@ -291,62 +290,37 @@ fn owned_base_via_complete_candidates(
         if !graph.mros[complete].contains(&source_index) {
             continue;
         }
-        if !compatible_owned_cast_generics(graph, source_index, complete) {
-            continue;
-        }
 
         for source_view in subobject_views(graph, complete)
             .into_iter()
-            .filter(|source_view| {
-                source_view.class_index == source_index
-                    && type_key(&source_view.actual) == type_key(&source_actual)
-            })
+            .filter(|source_view| source_view.class_index == source_index)
         {
             let source_path = source_view.path;
             let source_id = subobject_id(graph, complete, &source_path);
             let mut path = source_path;
             path.extend(view.path.clone());
             let target_actual = ancestor_type_for_path(graph, complete, &path);
-            if type_key(&target_actual) != target_key {
+            let Some(complete_actual) = actual_class_type_for_candidate(
+                graph,
+                complete,
+                &[
+                    (source_view.actual.clone(), source_actual.clone()),
+                    (target_actual, view.actual.clone()),
+                ],
+            ) else {
                 continue;
-            }
+            };
 
             candidates.push(OwnedBaseViaCandidate {
                 complete,
                 source_id,
                 path,
+                complete_actual,
             });
         }
     }
 
     candidates
-}
-
-fn compatible_owned_cast_generics(graph: &Graph, source: usize, complete: usize) -> bool {
-    if source == complete {
-        return true;
-    }
-
-    if graph.classes[source].generics.params.is_empty()
-        && graph.classes[complete].generics.params.is_empty()
-    {
-        return true;
-    }
-
-    generic_params_key(&graph.classes[source].generics)
-        == generic_params_key(&graph.classes[complete].generics)
-}
-
-fn generic_params_key(generics: &Generics) -> Vec<String> {
-    generics
-        .params
-        .iter()
-        .map(|param| match param {
-            GenericParam::Type(param) => param.ident.to_string(),
-            GenericParam::Lifetime(param) => param.lifetime.ident.to_string(),
-            GenericParam::Const(param) => param.ident.to_string(),
-        })
-        .collect()
 }
 
 fn add_static_type_param_bounds(generics: &mut Generics) {
